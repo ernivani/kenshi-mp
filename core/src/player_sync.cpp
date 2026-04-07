@@ -1,19 +1,15 @@
 // player_sync.cpp — Synchronize local player state with remote server
 //
-// Each frame (via game loop hook):
-//   1. Poll network for incoming packets
-//   2. Read local player position/rotation from KenshiLib
-//   3. If changed significantly, send PLAYER_STATE to server (20Hz)
-//   4. Update remote NPC interpolation
+// Runs on the game thread via AddHook. Reads player state from KenshiLib,
+// sends over ENet, dispatches incoming packets to subsystems.
 
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <string>
 
 #include <kenshi/Character.h>
 #include <OgreVector3.h>
-#include <OgreQuaternion.h>
-#include <OgreMath.h>
 #include <OgreLogManager.h>
 
 #include "packets.h"
@@ -60,20 +56,20 @@ static float distance_sq(const PlayerState& a, const PlayerState& b) {
     return dx*dx + dy*dy + dz*dz;
 }
 
-// Read the local player's current state from KenshiLib
-// TODO: KenshiLib calls not thread-safe, using dummy position for now
 static bool read_local_player_state(PlayerState& out) {
-    // Can't call ch->getPosition() from background thread — crashes
-    // Send a dummy position so the server knows we're alive
-    out.x = 0.0f;
-    out.y = 0.0f;
-    out.z = 0.0f;
+    Character* ch = game_get_player_character();
+    if (!ch) return false;
+
+    Ogre::Vector3 pos = ch->getPosition();
+    out.x = pos.x;
+    out.y = pos.y;
+    out.z = pos.z;
     out.yaw = 0.0f;
-    out.speed = 0.0f;
+    out.speed = ch->getMovementSpeed();
     out.animation_id = 0;
     out.player_id = client_get_local_id();
 
-    return client_is_connected();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,29 +147,21 @@ void player_sync_shutdown() {
 }
 
 // ---------------------------------------------------------------------------
-// Tick — called every frame from the game loop hook with real delta time
+// Tick — called every frame on the game thread via AddHook
 // ---------------------------------------------------------------------------
 void player_sync_tick(float dt) {
     if (!s_initialized) return;
 
-    // Log periodically to confirm tick is running
-    static int s_tick_count = 0;
-    s_tick_count++;
-    if (s_tick_count <= 3 || s_tick_count % 1000 == 0) {
-        Ogre::LogManager::getSingleton().logMessage(
-            "[KenshiMP] Tick #" + std::to_string(s_tick_count));
-    }
-
-    // Always check for F8/F9 hotkey
+    // Always check for hotkeys
     ui_check_hotkey();
 
-    // Poll network if connected (to receive CONNECT_ACCEPT, etc.)
+    // Poll network if connected
     if (client_is_connected()) {
         client_poll();
     }
 
-    // Only do sync when connected
-    if (!client_is_connected()) return;
+    // Only do game sync when connected and world is loaded
+    if (!client_is_connected() || !game_is_world_loaded()) return;
 
     // Update remote NPC positions (interpolation)
     npc_manager_update(dt);
@@ -188,7 +176,7 @@ void player_sync_tick(float dt) {
             if (distance_sq(current, s_last_sent_state) > POSITION_EPSILON * POSITION_EPSILON ||
                 current.animation_id != s_last_sent_state.animation_id) {
 
-                auto buf = pack(current);
+                std::vector<uint8_t> buf = pack(current);
                 client_send_unreliable(buf.data(), buf.size());
                 s_last_sent_state = current;
             }
