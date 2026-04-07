@@ -84,8 +84,8 @@ void session_on_disconnect(ENetPeer* peer) {
 // Packet handling
 // ---------------------------------------------------------------------------
 static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t length) {
-    auto req = unpack<ConnectRequest>(data, length);
-    if (!req) return;
+    ConnectRequest req;
+    if (!unpack(data, length, req)) return;
 
     // Check max players
     if (s_sessions.size() >= MAX_PLAYERS) {
@@ -102,9 +102,9 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     PlayerSession session;
     session.id = id;
     session.peer = peer;
-    std::strncpy(session.name, req->name, MAX_NAME_LENGTH - 1);
+    std::strncpy(session.name, req.name, MAX_NAME_LENGTH - 1);
     session.name[MAX_NAME_LENGTH - 1] = '\0';
-    std::strncpy(session.model, req->model, MAX_MODEL_LENGTH - 1);
+    std::strncpy(session.model, req.model, MAX_MODEL_LENGTH - 1);
     session.model[MAX_MODEL_LENGTH - 1] = '\0';
     session.x = session.y = session.z = session.yaw = 0.0f;
     session.last_activity = std::chrono::steady_clock::now();
@@ -154,42 +154,42 @@ static void handle_player_state(ENetPeer* peer, const uint8_t* data, size_t leng
     auto it = s_peer_to_id.find(peer);
     if (it == s_peer_to_id.end()) return;
 
-    auto state = unpack<PlayerState>(data, length);
-    if (!state) return;
+    PlayerState state;
+    if (!unpack(data, length, state)) return;
 
     uint32_t id = it->second;
     auto& session = s_sessions[id];
 
     // Update server-side position
-    session.x = state->x;
-    session.y = state->y;
-    session.z = state->z;
-    session.yaw = state->yaw;
+    session.x = state.x;
+    session.y = state.y;
+    session.z = state.z;
+    session.yaw = state.yaw;
     session.last_activity = std::chrono::steady_clock::now();
 
     // Stamp the correct player_id (don't trust client)
-    PlayerState relayed = *state;
+    PlayerState relayed = state;
     relayed.player_id = id;
 
     auto buf = pack(relayed);
     relay_broadcast(peer, buf.data(), buf.size(), false);
 
-    world_state_update_position(id, state->x, state->y, state->z,
-                                 state->yaw, state->animation_id, state->speed);
+    world_state_update_position(id, state.x, state.y, state.z,
+                                 state.yaw, state.animation_id, state.speed);
 }
 
 static void handle_chat_message(ENetPeer* peer, const uint8_t* data, size_t length) {
     auto it = s_peer_to_id.find(peer);
     if (it == s_peer_to_id.end()) return;
 
-    auto msg = unpack<ChatMessage>(data, length);
-    if (!msg) return;
+    ChatMessage msg;
+    if (!unpack(data, length, msg)) return;
 
     uint32_t id = it->second;
-    spdlog::info("[Chat] Player {}: {}", id, msg->message);
+    spdlog::info("[Chat] Player {}: {}", id, msg.message);
 
     // Stamp correct player_id and broadcast to all (including sender)
-    ChatMessage relayed = *msg;
+    ChatMessage relayed = msg;
     relayed.player_id = id;
 
     auto buf = pack(relayed);
@@ -198,20 +198,21 @@ static void handle_chat_message(ENetPeer* peer, const uint8_t* data, size_t leng
 }
 
 static void handle_ping(ENetPeer* peer, const uint8_t* data, size_t length) {
-    auto ping = unpack<PingPacket>(data, length);
-    if (!ping) return;
+    PingPacket ping;
+    if (!unpack(data, length, ping)) return;
 
     PongPacket pong;
-    pong.timestamp_ms = ping->timestamp_ms;
+    pong.timestamp_ms = ping.timestamp_ms;
     auto buf = pack(pong);
     relay_send_to(peer, buf.data(), buf.size(), false);
 }
 
 void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
-    auto header = peek_header(data, length);
-    if (!header || !validate_version(*header)) return;
+    PacketHeader header;
+    if (!peek_header(data, length, header)) return;
+    if (!validate_version(header)) return;
 
-    switch (header->type) {
+    switch (header.type) {
     case PacketType::CONNECT_REQUEST:
         handle_connect_request(peer, data, length);
         break;
@@ -225,7 +226,7 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         handle_ping(peer, data, length);
         break;
     default:
-        spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header->type));
+        spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header.type));
         break;
     }
 }
