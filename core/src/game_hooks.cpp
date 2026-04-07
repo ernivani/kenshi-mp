@@ -2,6 +2,12 @@
 //
 // Provides game state access to other subsystems.
 // All KenshiLib-specific code is isolated here.
+//
+// NOTE: KenshiLib game objects are NOT thread-safe. These functions
+// may be called from a background thread, so we guard against crashes.
+
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
@@ -16,32 +22,44 @@ namespace kmp {
 // Returns nullptr if the game world isn't loaded yet or player has no characters.
 // ---------------------------------------------------------------------------
 Character* game_get_player_character() {
-    if (!ou) return nullptr;
-    if (!ou->player) return nullptr;
+    __try {
+        if (!ou) return nullptr;
+        if (!ou->player) return nullptr;
 
-    const auto& chars = ou->player->getAllPlayerCharacters();
-    if (chars.count <= 0) return nullptr;
+        const auto& chars = ou->player->getAllPlayerCharacters();
+        if (chars.count <= 0) return nullptr;
 
-    return chars.stuff[0];
+        return chars.stuff[0];
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Get the RootObjectFactory for spawning NPCs.
 // ---------------------------------------------------------------------------
 RootObjectFactory* game_get_factory() {
-    if (!ou) return nullptr;
-    return ou->theFactory;
+    __try {
+        if (!ou) return nullptr;
+        return ou->theFactory;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Check if the game world is fully loaded and the player has characters.
 // ---------------------------------------------------------------------------
 bool game_is_world_loaded() {
-    if (!ou) return false;
-    if (!ou->player) return false;
+    __try {
+        if (!ou) return false;
+        if (!ou->player) return false;
 
-    const auto& chars = ou->player->getAllPlayerCharacters();
-    return chars.count > 0;
+        const auto& chars = ou->player->getAllPlayerCharacters();
+        return chars.count > 0;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
