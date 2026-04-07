@@ -7,6 +7,7 @@
 // via the game loop hook), so they are thread-safe.
 
 #include <string>
+#include <sstream>
 #include <vector>
 #include <cstring>
 
@@ -22,6 +23,12 @@
 
 namespace kmp {
 
+static std::string itos(uint32_t val) {
+    std::ostringstream ss;
+    ss << val;
+    return ss.str();
+}
+
 // External
 extern bool client_connect(const char* host, uint16_t port);
 extern void client_disconnect();
@@ -36,18 +43,18 @@ static bool s_ui_initialized = false;
 static bool s_ui_visible = false;
 
 // MyGUI widgets
-static MyGUI::Window*   s_connect_window = nullptr;
-static MyGUI::EditBox*  s_host_input     = nullptr;
-static MyGUI::EditBox*  s_port_input     = nullptr;
-static MyGUI::Button*   s_connect_btn    = nullptr;
-static MyGUI::Button*   s_disconnect_btn = nullptr;
+static MyGUI::Window*   s_connect_window = NULL;
+static MyGUI::EditBox*  s_host_input     = NULL;
+static MyGUI::EditBox*  s_port_input     = NULL;
+static MyGUI::Button*   s_connect_btn    = NULL;
+static MyGUI::Button*   s_disconnect_btn = NULL;
 
-static MyGUI::Window*   s_chat_window    = nullptr;
-static MyGUI::EditBox*  s_chat_display   = nullptr;
-static MyGUI::EditBox*  s_chat_input     = nullptr;
-static MyGUI::Button*   s_chat_send_btn  = nullptr;
+static MyGUI::Window*   s_chat_window    = NULL;
+static MyGUI::EditBox*  s_chat_display   = NULL;
+static MyGUI::EditBox*  s_chat_input     = NULL;
+static MyGUI::Button*   s_chat_send_btn  = NULL;
 
-static MyGUI::TextBox*  s_status_text    = nullptr;
+static MyGUI::TextBox*  s_status_text    = NULL;
 
 // Chat log
 struct ChatEntry {
@@ -70,13 +77,6 @@ static void update_status_text();
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 void ui_init() {
-    // Skip MyGUI widget creation for now — use hotkey-based connect instead
-    // MyGUI skin/timing issues cause crashes during early init
-    s_ui_initialized = true;
-    s_ui_visible = false;
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] UI initialized (headless mode)");
-    return;
-
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (!gui) {
         Ogre::LogManager::getSingleton().logMessage(
@@ -99,7 +99,7 @@ void ui_init() {
     s_connect_window->setVisible(false);
 
     // Host label + input
-    auto* host_label = s_connect_window->createWidget<MyGUI::TextBox>(
+    MyGUI::TextBox* host_label = s_connect_window->createWidget<MyGUI::TextBox>(
         "Kenshi_TextboxStandardText",
         MyGUI::IntCoord(10, 10, 60, 26),
         MyGUI::Align::Default,
@@ -116,7 +116,7 @@ void ui_init() {
     s_host_input->setCaption("127.0.0.1");
 
     // Port label + input
-    auto* port_label = s_connect_window->createWidget<MyGUI::TextBox>(
+    MyGUI::TextBox* port_label = s_connect_window->createWidget<MyGUI::TextBox>(
         "Kenshi_TextboxStandardText",
         MyGUI::IntCoord(10, 44, 60, 26),
         MyGUI::Align::Default,
@@ -226,9 +226,9 @@ void ui_init() {
 void ui_shutdown() {
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (gui) {
-        if (s_connect_window) { gui->destroyWidget(s_connect_window); s_connect_window = nullptr; }
-        if (s_chat_window)    { gui->destroyWidget(s_chat_window);    s_chat_window = nullptr; }
-        if (s_status_text)    { gui->destroyWidget(s_status_text);    s_status_text = nullptr; }
+        if (s_connect_window) { gui->destroyWidget(s_connect_window); s_connect_window = NULL; }
+        if (s_chat_window)    { gui->destroyWidget(s_chat_window);    s_chat_window = NULL; }
+        if (s_status_text)    { gui->destroyWidget(s_status_text);    s_status_text = NULL; }
     }
 
     s_chat_log.clear();
@@ -266,9 +266,11 @@ void ui_check_hotkey() {
             Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connecting to 127.0.0.1:7777...");
             if (client_connect("127.0.0.1", 7777)) {
                 ConnectRequest req;
-                safe_strcpy(req.name, "Player");
-                safe_strcpy(req.model, "greenlander");
-                auto buf = pack(req);
+                std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
+                req.name[MAX_NAME_LENGTH - 1] = '\0';
+                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+                req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connected!");
             } else {
@@ -288,7 +290,7 @@ void ui_check_hotkey() {
 void ui_on_connect_accept(uint32_t player_id) {
     ChatEntry entry;
     entry.sender = "[KenshiMP]";
-    entry.message = "Connected! Your ID: " + std::to_string(player_id);
+    entry.message = "Connected! Your ID: " + itos(player_id);
     s_chat_log.push_back(entry);
     refresh_chat_display();
     update_status_text();
@@ -301,7 +303,7 @@ void ui_on_connect_accept(uint32_t player_id) {
 
 void ui_on_chat(const ChatMessage& pkt) {
     ChatEntry entry;
-    entry.sender = "Player " + std::to_string(pkt.player_id);
+    entry.sender = "Player " + itos(pkt.player_id);
     entry.message = pkt.message;
     s_chat_log.push_back(entry);
     refresh_chat_display();
@@ -316,9 +318,10 @@ void ui_send_chat(const char* message) {
 
     ChatMessage pkt;
     pkt.player_id = client_get_local_id();
-    safe_strcpy(pkt.message, message);
+    std::strncpy(pkt.message, message, MAX_CHAT_LENGTH - 1);
+    pkt.message[MAX_CHAT_LENGTH - 1] = '\0';
 
-    auto buf = pack(pkt);
+    std::vector<uint8_t> buf = pack(pkt);
     client_send_reliable(buf.data(), buf.size());
 }
 
@@ -336,9 +339,11 @@ static void on_connect_clicked(MyGUI::Widget* sender) {
     // Send connect request after ENet connection
     if (client_connect(host.c_str(), port)) {
         ConnectRequest req;
-        safe_strcpy(req.name, "Player");
-        safe_strcpy(req.model, "greenlander");
-        auto buf = pack(req);
+        std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
+        req.name[MAX_NAME_LENGTH - 1] = '\0';
+        std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+        req.model[MAX_MODEL_LENGTH - 1] = '\0';
+        std::vector<uint8_t> buf = pack(req);
         client_send_reliable(buf.data(), buf.size());
 
         update_status_text();
@@ -390,7 +395,7 @@ static void update_status_text() {
 
     if (client_is_connected()) {
         s_status_text->setCaption(
-            "KenshiMP — Connected as Player #" + std::to_string(client_get_local_id())
+            "KenshiMP — Connected as Player #" + itos(client_get_local_id())
         );
         s_status_text->setTextColour(MyGUI::Colour(0.4f, 1.0f, 0.4f));
     } else {
