@@ -73,6 +73,19 @@ struct RemotePlayer {
 static std::map<uint32_t, RemotePlayer> s_remote_players;
 
 // ---------------------------------------------------------------------------
+// Remote NPC sync (from host via server)
+// ---------------------------------------------------------------------------
+struct RemoteNPC {
+    uint32_t   npc_id;
+    Character* npc;
+    Snapshot   prev;
+    Snapshot   next;
+    double     interp_t;
+};
+
+static std::map<uint32_t, RemoteNPC> s_remote_npcs;
+
+// ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 void npc_manager_init() {
@@ -88,6 +101,14 @@ void npc_manager_shutdown() {
         }
     }
     s_remote_players.clear();
+
+    std::map<uint32_t, RemoteNPC>::iterator rnpc_it;
+    for (rnpc_it = s_remote_npcs.begin(); rnpc_it != s_remote_npcs.end(); ++rnpc_it) {
+        if (rnpc_it->second.npc && world) {
+            world->destroy(rnpc_it->second.npc, false, "KenshiMP shutdown");
+        }
+    }
+    s_remote_npcs.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +205,88 @@ void npc_manager_on_disconnect(uint32_t player_id) {
 }
 
 // ---------------------------------------------------------------------------
+// Remote NPC handlers (from host sync)
+// ---------------------------------------------------------------------------
+void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
+    if (s_remote_npcs.count(pkt.npc_id)) return;
+
+    RemoteNPC rnpc;
+    std::memset(&rnpc, 0, sizeof(rnpc));
+    rnpc.npc_id = pkt.npc_id;
+    rnpc.npc = NULL;
+
+    double now = get_time_sec();
+    Snapshot snap;
+    snap.x = pkt.x;
+    snap.y = pkt.y;
+    snap.z = pkt.z;
+    snap.yaw = pkt.yaw;
+    snap.animation_id = 0;
+    snap.speed = 0.0f;
+    snap.timestamp = now;
+    rnpc.prev = snap;
+    rnpc.next = snap;
+    rnpc.interp_t = 1.0;
+
+    RootObjectFactory* factory = game_get_factory();
+    if (factory) {
+        Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
+
+        RootObjectBase* obj = factory->createRandomCharacter(
+            NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+        );
+
+        Character* npc = dynamic_cast<Character*>(obj);
+        if (npc) {
+            if (npc->ai) {
+                npc->ai = NULL;
+            }
+            rnpc.npc = npc;
+            Ogre::LogManager::getSingleton().logMessage(
+                "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
+                " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
+        }
+    }
+
+    s_remote_npcs[pkt.npc_id] = rnpc;
+}
+
+void npc_manager_on_remote_state(const NPCStateEntry& entry) {
+    std::map<uint32_t, RemoteNPC>::iterator it = s_remote_npcs.find(entry.npc_id);
+    if (it == s_remote_npcs.end()) return;
+
+    RemoteNPC& rnpc = it->second;
+    rnpc.prev = rnpc.next;
+
+    Snapshot snap;
+    snap.x = entry.x;
+    snap.y = entry.y;
+    snap.z = entry.z;
+    snap.yaw = entry.yaw;
+    snap.animation_id = entry.animation_id;
+    snap.speed = entry.speed;
+    snap.timestamp = get_time_sec();
+    rnpc.next = snap;
+    rnpc.interp_t = 0.0;
+}
+
+void npc_manager_on_remote_despawn(uint32_t npc_id) {
+    std::map<uint32_t, RemoteNPC>::iterator it = s_remote_npcs.find(npc_id);
+    if (it == s_remote_npcs.end()) return;
+
+    if (it->second.npc) {
+        GameWorld* world = game_get_world();
+        if (world) {
+            world->destroy(it->second.npc, false, "KenshiMP NPC despawn");
+        }
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Despawned remote NPC " + itos(npc_id));
+    }
+
+    s_remote_npcs.erase(it);
+}
+
+// ---------------------------------------------------------------------------
 // Per-frame interpolation + teleport
 // ---------------------------------------------------------------------------
 static float lerp(float a, float b, float t) {
@@ -217,6 +320,29 @@ void npc_manager_update(float dt) {
             Ogre::Vector3 pos(ix, iy, iz);
             Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
             rp.npc->teleport(pos, rot);
+        }
+    }
+
+    // Also interpolate remote NPCs (from host sync)
+    std::map<uint32_t, RemoteNPC>::iterator npc_it;
+    for (npc_it = s_remote_npcs.begin(); npc_it != s_remote_npcs.end(); ++npc_it) {
+        RemoteNPC& rnpc = npc_it->second;
+
+        if (rnpc.interp_t < 1.0) {
+            rnpc.interp_t += static_cast<double>(dt) * 10.0;
+            if (rnpc.interp_t > 1.0) rnpc.interp_t = 1.0;
+        }
+
+        float t = static_cast<float>(rnpc.interp_t);
+        float ix = lerp(rnpc.prev.x, rnpc.next.x, t);
+        float iy = lerp(rnpc.prev.y, rnpc.next.y, t);
+        float iz = lerp(rnpc.prev.z, rnpc.next.z, t);
+        float iyaw = lerp_angle(rnpc.prev.yaw, rnpc.next.yaw, t);
+
+        if (rnpc.npc) {
+            Ogre::Vector3 pos(ix, iy, iz);
+            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
+            rnpc.npc->teleport(pos, rot);
         }
     }
 }
