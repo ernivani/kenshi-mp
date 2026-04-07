@@ -1,5 +1,6 @@
 # Build output
 build/
+build_server/
 out/
 
 # Dependencies (cloned/extracted locally)
