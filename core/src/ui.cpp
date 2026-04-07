@@ -301,6 +301,15 @@ void ui_on_connect_accept(uint32_t player_id) {
     }
 }
 
+void ui_on_disconnect() {
+    ChatEntry entry;
+    entry.sender = "[KenshiMP]";
+    entry.message = "Disconnected from server";
+    s_chat_log.push_back(entry);
+    refresh_chat_display();
+    update_status_text();
+}
+
 void ui_on_chat(const ChatMessage& pkt) {
     ChatEntry entry;
     entry.sender = "Player " + itos(pkt.player_id);
