@@ -53,7 +53,7 @@ extern "C" __declspec(dllexport) void startPlugin() {
         reinterpret_cast<void**>(&s_original_main_loop)
     );
 
-    if (status != HookStatus::SUCCESS) {
+    if (status != KenshiLib::HookStatus::SUCCESS) {
         Ogre::LogManager::getSingleton().logMessage(
             "[KenshiMP] FATAL: Failed to hook game loop!"
         );
