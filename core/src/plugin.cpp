@@ -1,12 +1,11 @@
 // plugin.cpp — KenshiLib plugin entry point for KenshiMP
 //
 // RE_Kenshi mod loader calls startPlugin() when the mod is loaded.
-// We use Ogre::FrameListener for per-frame updates.
-// Subsystem init is deferred to the first frame since MyGUI and
-// game systems aren't ready during plugin load.
+// We run our sync loop on a background thread since Ogre::FrameListener
+// doesn't work with Kenshi's custom game loop.
 
-#include <OgreRoot.h>
-#include <OgreFrameListener.h>
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #include <OgreLogManager.h>
 
 // Forward declarations for our subsystems
@@ -23,35 +22,46 @@ namespace kmp {
 }
 
 // ---------------------------------------------------------------------------
-// Ogre FrameListener — called every frame by the rendering engine
+// Background thread — runs our sync loop at ~20Hz
 // ---------------------------------------------------------------------------
-class KenshiMPFrameListener : public Ogre::FrameListener {
-public:
-    bool frameRenderingQueued(const Ogre::FrameEvent& evt) override {
-        // Defer subsystem init to first frame (MyGUI not ready during plugin load)
-        if (!m_initialized) {
-            m_initialized = true;
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialising subsystems...");
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] client_init...");
-            kmp::client_init();
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] npc_manager_init...");
-            kmp::npc_manager_init();
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] player_sync_init...");
-            kmp::player_sync_init();
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] ui_init...");
-            kmp::ui_init();
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready");
-        }
+static volatile bool s_running = false;
+static HANDLE s_thread = nullptr;
 
-        kmp::player_sync_tick(evt.timeSinceLastFrame);
-        return true;
+static DWORD WINAPI sync_thread(LPVOID) {
+    // Wait a few seconds for the game to fully initialize
+    Sleep(5000);
+
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Sync thread starting...");
+
+    kmp::client_init();
+    kmp::npc_manager_init();
+    kmp::player_sync_init();
+    kmp::ui_init();
+
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready, entering loop");
+
+    LARGE_INTEGER freq, last, now;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&last);
+
+    while (s_running) {
+        QueryPerformanceCounter(&now);
+        float dt = static_cast<float>(now.QuadPart - last.QuadPart) / static_cast<float>(freq.QuadPart);
+        last = now;
+
+        kmp::player_sync_tick(dt);
+
+        // Sleep ~50ms (20Hz) but use shorter sleep for responsive hotkeys
+        Sleep(16);
     }
 
-private:
-    bool m_initialized = false;
-};
+    kmp::ui_shutdown();
+    kmp::player_sync_shutdown();
+    kmp::npc_manager_shutdown();
+    kmp::client_shutdown();
 
-static KenshiMPFrameListener* s_listener = nullptr;
+    return 0;
+}
 
 // ---------------------------------------------------------------------------
 // Plugin entry point — called by RE_Kenshi mod loader
@@ -59,9 +69,8 @@ static KenshiMPFrameListener* s_listener = nullptr;
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
-    // Register frame listener — actual init happens on first frame
-    s_listener = new KenshiMPFrameListener();
-    Ogre::Root::getSingleton().addFrameListener(s_listener);
+    s_running = true;
+    s_thread = CreateThread(nullptr, 0, sync_thread, nullptr, 0, nullptr);
 
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK");
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK (sync thread started)");
 }

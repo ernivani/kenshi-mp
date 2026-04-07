@@ -14,6 +14,7 @@
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
+#include <OgreLogManager.h>
 
 #include "packets.h"
 #include "protocol.h"
@@ -158,7 +159,15 @@ void player_sync_shutdown() {
 void player_sync_tick(float dt) {
     if (!s_initialized) return;
 
-    // Always check for F8 hotkey
+    // Log periodically to confirm tick is running
+    static int s_tick_count = 0;
+    s_tick_count++;
+    if (s_tick_count <= 3 || s_tick_count % 1000 == 0) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Tick #" + std::to_string(s_tick_count));
+    }
+
+    // Always check for F8/F9 hotkey
     ui_check_hotkey();
 
     // Poll network if connected (to receive CONNECT_ACCEPT, etc.)
