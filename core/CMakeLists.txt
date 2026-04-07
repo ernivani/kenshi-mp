@@ -17,16 +17,39 @@ add_library(KenshiMP SHARED
 
 target_compile_features(KenshiMP PRIVATE cxx_std_17)
 
+# Compatibility: Boost 1.60 uses std::unary_function (removed in C++17)
+# KenshiLib uses wide-string Windows APIs
+target_compile_definitions(KenshiMP PRIVATE
+    _HAS_AUTO_PTR_ETC=1
+    UNICODE
+    _UNICODE
+    BOOST_ALL_NO_LIB
+)
+
 # Common protocol headers
 target_link_libraries(KenshiMP PRIVATE kenshi-mp-common)
 
 # KenshiLib (game API + hooking)
 if(KENSHILIB_DIR)
     target_include_directories(KenshiMP PRIVATE
-        ${KENSHILIB_DIR}/include
+        ${KENSHILIB_DIR}/Include
+        ${KENSHILIB_DIR}/Include/ogre
+        ${KENSHILIB_DIR}/Include/mygui
     )
-    target_link_directories(KenshiMP PRIVATE ${KENSHILIB_DIR}/lib)
-    target_link_libraries(KenshiMP PRIVATE KenshiLib)
+    target_link_directories(KenshiMP PRIVATE
+        ${KENSHILIB_DIR}/Libraries
+        ${KENSHILIB_DIR}/Libraries/ogre
+        ${KENSHILIB_DIR}/Libraries/mygui
+    )
+    # Also check KENSHILIB_EXAMPLES_DEPS for prebuilt KenshiLib.lib
+    if(KENSHILIB_EXAMPLES_DEPS)
+        target_link_directories(KenshiMP PRIVATE
+            ${KENSHILIB_EXAMPLES_DEPS}/KenshiLib/Libraries
+        )
+    endif()
+    target_link_libraries(KenshiMP PRIVATE KenshiLib OgreMain_x64 MyGUIEngine_x64
+        boost_system-vc100-mt-1_60 boost_thread-vc100-mt-1_60
+    )
 endif()
 
 # KenshiLib deps root (contains Ogre, Boost, MinHook, MyGUI)
@@ -65,7 +88,10 @@ else()
 
     if(BOOST_ROOT)
         target_include_directories(KenshiMP PRIVATE ${BOOST_ROOT})
-        target_link_directories(KenshiMP PRIVATE ${BOOST_ROOT}/lib64-msvc-10.0)
+        target_link_directories(KenshiMP PRIVATE
+            ${BOOST_ROOT}/stage/lib
+            ${BOOST_ROOT}/lib64-msvc-10.0
+        )
     endif()
 
     if(MYGUI_DIR)
