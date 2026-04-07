@@ -24,6 +24,8 @@ target_compile_definitions(KenshiMP PRIVATE
     UNICODE
     _UNICODE
     BOOST_ALL_NO_LIB
+    BOOST_ERROR_CODE_HEADER_ONLY
+    BOOST_SYSTEM_NO_DEPRECATED
 )
 
 # Common protocol headers
@@ -47,9 +49,7 @@ if(KENSHILIB_DIR)
             ${KENSHILIB_EXAMPLES_DEPS}/KenshiLib/Libraries
         )
     endif()
-    target_link_libraries(KenshiMP PRIVATE KenshiLib OgreMain_x64 MyGUIEngine_x64
-        boost_system-vc100-mt-1_60 boost_thread-vc100-mt-1_60
-    )
+    target_link_libraries(KenshiMP PRIVATE KenshiLib OgreMain_x64 MyGUIEngine_x64)
 endif()
 
 # KenshiLib deps root (contains Ogre, Boost, MinHook, MyGUI)
