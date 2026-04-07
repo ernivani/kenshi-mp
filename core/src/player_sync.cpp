@@ -19,6 +19,8 @@ namespace kmp {
 
 // External subsystems
 extern void client_poll();
+extern bool client_connect(const char* host, uint16_t port);
+extern void client_disconnect();
 extern void client_send_unreliable(const uint8_t* data, size_t length);
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern bool client_is_connected();
@@ -37,6 +39,7 @@ extern void npc_manager_update(float dt);
 
 extern void ui_on_chat(const ChatMessage& pkt);
 extern void ui_on_connect_accept(uint32_t player_id);
+extern void ui_on_disconnect();
 extern void ui_check_hotkey();
 
 // ---------------------------------------------------------------------------
@@ -152,38 +155,63 @@ void player_sync_shutdown() {
 void player_sync_tick(float dt) {
     if (!s_initialized) return;
 
+    // Track connection state to detect drops
+    static bool s_was_connected = false;
+    static bool s_auto_reconnect = false;
+    static std::string s_last_host;
+    static uint16_t s_last_port = 0;
+
     // Always check for hotkeys
     ui_check_hotkey();
 
     // Poll network if connected
     if (client_is_connected()) {
         client_poll();
+        s_was_connected = true;
+    }
+
+    // Detect disconnection
+    if (s_was_connected && !client_is_connected()) {
+        s_was_connected = false;
+        s_auto_reconnect = true;
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Connection lost, will auto-reconnect...");
+        ui_on_disconnect();
+    }
+
+    // Auto-reconnect after disconnect
+    if (s_auto_reconnect && !client_is_connected() && game_is_world_loaded()) {
+        static float s_reconnect_timer = 0.0f;
+        s_reconnect_timer += dt;
+        if (s_reconnect_timer >= 3.0f) {
+            s_reconnect_timer = 0.0f;
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Attempting reconnect...");
+            if (client_connect("127.0.0.1", 7777)) {
+                ConnectRequest req;
+                std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
+                req.name[MAX_NAME_LENGTH - 1] = '\0';
+                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+                req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                std::vector<uint8_t> buf = pack(req);
+                client_send_reliable(buf.data(), buf.size());
+                s_auto_reconnect = false;
+                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Reconnected!");
+            }
+        }
     }
 
     // Only do game sync when connected and world is loaded
     if (!client_is_connected() || !game_is_world_loaded()) return;
 
-    // Debug: log first time we reach game sync
-    static bool s_logged_sync = false;
-    if (!s_logged_sync) {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] First game sync tick");
-        s_logged_sync = true;
-    }
-
     // Update remote NPC positions (interpolation)
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: before npc_update");
     npc_manager_update(dt);
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: after npc_update");
 
     // Send local player state at tick rate
     s_send_timer += dt;
     if (s_send_timer >= TICK_INTERVAL_SEC) {
         s_send_timer = 0.0f;
 
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: before read_state");
         PlayerState current;
         if (read_local_player_state(current)) {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: state read OK");
             if (distance_sq(current, s_last_sent_state) > POSITION_EPSILON * POSITION_EPSILON ||
                 current.animation_id != s_last_sent_state.animation_id) {
 
