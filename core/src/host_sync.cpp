@@ -102,9 +102,8 @@ void host_sync_spawn_test_npc(float x, float y, float z) {
 
     Character* npc = dynamic_cast<Character*>(obj);
     if (npc) {
-        if (npc->ai) {
-            npc->ai = NULL;
-        }
+        // Don't null out AI — game still needs it for internal state
+        // The NPC will wander on the host, but joiners control position
 
         // Add to synced set so it gets sent to joiners
         uint64_t key = make_npc_key(npc);

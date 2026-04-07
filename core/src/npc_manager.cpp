@@ -151,9 +151,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            if (npc->ai) {
-                npc->ai = NULL;
-            }
+            // Don't null AI — causes crash on next frame
             rp.npc = npc;
             Ogre::LogManager::getSingleton().logMessage(
                 "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
@@ -242,9 +240,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            if (npc->ai) {
-                npc->ai = NULL;
-            }
+            // Don't null AI — causes crash on next frame
             rnpc.npc = npc;
             Ogre::LogManager::getSingleton().logMessage(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
