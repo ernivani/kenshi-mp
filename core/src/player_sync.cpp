@@ -163,16 +163,27 @@ void player_sync_tick(float dt) {
     // Only do game sync when connected and world is loaded
     if (!client_is_connected() || !game_is_world_loaded()) return;
 
+    // Debug: log first time we reach game sync
+    static bool s_logged_sync = false;
+    if (!s_logged_sync) {
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] First game sync tick");
+        s_logged_sync = true;
+    }
+
     // Update remote NPC positions (interpolation)
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: before npc_update");
     npc_manager_update(dt);
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: after npc_update");
 
     // Send local player state at tick rate
     s_send_timer += dt;
     if (s_send_timer >= TICK_INTERVAL_SEC) {
         s_send_timer = 0.0f;
 
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: before read_state");
         PlayerState current;
         if (read_local_player_state(current)) {
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] DBG: state read OK");
             if (distance_sq(current, s_last_sent_state) > POSITION_EPSILON * POSITION_EPSILON ||
                 current.animation_id != s_last_sent_state.animation_id) {
 
