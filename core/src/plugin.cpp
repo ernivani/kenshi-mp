@@ -4,6 +4,9 @@
 // We hook the game's main loop via KenshiLib::AddHook to get
 // per-frame callbacks on the game thread.
 
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
 #include <core/Functions.h>
@@ -54,8 +57,14 @@ static void hooked_main_loop(GameWorld* world, float time) {
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
+    // Get the game's base address and compute the function address from RVA
+    // RVA 0x7877A0 = GameWorld::mainLoop_GPUSensitiveStuff (from KenshiLib header)
+    // Can't use GetRealAddress — the _NV_ stub is empty (zero bytes)
+    uintptr_t game_base = (uintptr_t)GetModuleHandle(NULL);
+    intptr_t func_addr = (intptr_t)(game_base + 0x7877A0);
+
     KenshiLib::HookStatus status = KenshiLib::AddHook(
-        KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff),
+        func_addr,
         &hooked_main_loop,
         &s_original_main_loop
     );
