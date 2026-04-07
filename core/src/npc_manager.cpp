@@ -79,12 +79,7 @@ void npc_manager_init() {
 }
 
 void npc_manager_shutdown() {
-    GameWorld* world = game_get_world();
-    for (auto& pair : s_remote_players) {
-        if (pair.second.npc && world) {
-            world->destroy(pair.second.npc, false, "KenshiMP shutdown");
-        }
-    }
+    // TODO: destroy NPCs on game thread
     s_remote_players.clear();
 }
 
@@ -106,42 +101,13 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     rp.next = rp.prev;
     rp.interp_t = 1.0;
 
-    // Spawn NPC via KenshiLib
-    RootObjectFactory* factory = game_get_factory();
-    if (factory) {
-        Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
-        Ogre::Quaternion spawn_rot(Ogre::Radian(pkt.yaw), Ogre::Vector3::UNIT_Y);
-
-        // Use createRandomCharacter to spawn a basic humanoid NPC
-        // faction = nullptr (neutral), no home building, age 0
-        RootObjectBase* obj = factory->createRandomCharacter(
-            nullptr,          // faction (neutral)
-            spawn_pos,        // position
-            nullptr,          // container
-            nullptr,          // character template (default)
-            nullptr,          // home building
-            0.0f              // age
-        );
-
-        Character* npc = dynamic_cast<Character*>(obj);
-        if (npc) {
-            // Disable AI so we control movement directly via teleport
-            if (npc->ai) {
-                npc->ai = nullptr;
-            }
-            rp.npc = npc;
-
-            Ogre::LogManager::getSingleton().logMessage(
-                "[KenshiMP] Spawned NPC for player " + std::to_string(pkt.player_id)
-                + " '" + std::string(pkt.name) + "'"
-            );
-        } else {
-            Ogre::LogManager::getSingleton().logMessage(
-                "[KenshiMP] WARNING: Failed to spawn NPC for player "
-                + std::to_string(pkt.player_id)
-            );
-        }
-    }
+    // TODO: NPC spawning disabled — KenshiLib calls not thread-safe
+    // Need to queue spawn requests and execute on game thread
+    rp.npc = nullptr;
+    Ogre::LogManager::getSingleton().logMessage(
+        "[KenshiMP] Registered remote player " + std::to_string(pkt.player_id)
+        + " '" + std::string(pkt.name) + "' (NPC spawn deferred)"
+    );
 
     s_remote_players[pkt.player_id] = rp;
 }
@@ -174,17 +140,10 @@ void npc_manager_on_disconnect(uint32_t player_id) {
     auto it = s_remote_players.find(player_id);
     if (it == s_remote_players.end()) return;
 
-    if (it->second.npc) {
-        GameWorld* world = game_get_world();
-        if (world) {
-            world->destroy(it->second.npc, false, "KenshiMP disconnect");
-        }
-
-        Ogre::LogManager::getSingleton().logMessage(
-            "[KenshiMP] Despawned NPC for player " + std::to_string(player_id)
-        );
-    }
-
+    Ogre::LogManager::getSingleton().logMessage(
+        "[KenshiMP] Remote player " + std::to_string(player_id) + " disconnected"
+    );
+    // TODO: destroy NPC on game thread
     s_remote_players.erase(it);
 }
 
@@ -218,11 +177,8 @@ void npc_manager_update(float dt) {
         float iz = lerp(rp.prev.z, rp.next.z, t);
         float iyaw = lerp_angle(rp.prev.yaw, rp.next.yaw, t);
 
-        if (rp.npc) {
-            Ogre::Vector3 pos(ix, iy, iz);
-            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
-            rp.npc->teleport(pos, rot);
-        }
+        // TODO: teleport NPC on game thread
+        (void)ix; (void)iy; (void)iz; (void)iyaw;
     }
 }
 
