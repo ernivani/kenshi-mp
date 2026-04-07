@@ -61,24 +61,19 @@ static float distance_sq(const PlayerState& a, const PlayerState& b) {
 }
 
 // Read the local player's current state from KenshiLib
+// TODO: KenshiLib calls not thread-safe, using dummy position for now
 static bool read_local_player_state(PlayerState& out) {
-    Character* ch = game_get_player_character();
-    if (!ch) return false;
-
-    Ogre::Vector3 pos = ch->getPosition();
-    out.x = pos.x;
-    out.y = pos.y;
-    out.z = pos.z;
-
-    // Extract yaw from the character's raw position data
+    // Can't call ch->getPosition() from background thread — crashes
+    // Send a dummy position so the server knows we're alive
+    out.x = 0.0f;
+    out.y = 0.0f;
+    out.z = 0.0f;
     out.yaw = 0.0f;
-    float speed = ch->getMovementSpeed();
-    out.speed = speed;
-
-    out.animation_id = 0;  // MVP: idle only, animation sync is future work
+    out.speed = 0.0f;
+    out.animation_id = 0;
     out.player_id = client_get_local_id();
 
-    return true;
+    return client_is_connected();
 }
 
 // ---------------------------------------------------------------------------
@@ -88,20 +83,29 @@ static void on_packet_received(const uint8_t* data, size_t length) {
     auto header = peek_header(data, length);
     if (!header || !validate_version(*header)) return;
 
+    Ogre::LogManager::getSingleton().logMessage(
+        "[KenshiMP] Packet received: type=0x" +
+        std::to_string(static_cast<int>(header->type)));
+
     switch (header->type) {
     case PacketType::CONNECT_ACCEPT: {
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Processing CONNECT_ACCEPT");
         auto pkt = unpack<ConnectAccept>(data, length);
         if (pkt) {
             client_set_local_id(pkt->player_id);
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Local ID set to " + std::to_string(pkt->player_id));
             ui_on_connect_accept(pkt->player_id);
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] CONNECT_ACCEPT done");
         }
         break;
     }
 
     case PacketType::SPAWN_NPC: {
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Processing SPAWN_NPC");
         auto pkt = unpack<SpawnNPC>(data, length);
         if (pkt) {
             npc_manager_on_spawn(*pkt);
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] SPAWN_NPC done");
         }
         break;
     }
@@ -175,8 +179,8 @@ void player_sync_tick(float dt) {
         client_poll();
     }
 
-    // Only do game sync when world is loaded
-    if (!client_is_connected() || !game_is_world_loaded()) return;
+    // Only do sync when connected
+    if (!client_is_connected()) return;
 
     // Update remote NPC positions (interpolation)
     npc_manager_update(dt);
