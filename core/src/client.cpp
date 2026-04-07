@@ -114,6 +114,7 @@ void client_send_reliable(const uint8_t* data, size_t length) {
         data, length, ENET_PACKET_FLAG_RELIABLE
     );
     enet_peer_send(s_peer, CHANNEL_RELIABLE, packet);
+    enet_host_flush(s_client);
 }
 
 void client_send_unreliable(const uint8_t* data, size_t length) {
@@ -123,6 +124,7 @@ void client_send_unreliable(const uint8_t* data, size_t length) {
         data, length, ENET_PACKET_FLAG_UNSEQUENCED
     );
     enet_peer_send(s_peer, CHANNEL_UNRELIABLE, packet);
+    enet_host_flush(s_client);
 }
 
 template <typename T>
