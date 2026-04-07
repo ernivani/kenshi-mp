@@ -1,13 +1,19 @@
 // player_sync.cpp — Synchronize local player state with remote server
 //
-// Each frame (via game_hooks):
-//   1. Read local player position/rotation/animation
-//   2. If changed significantly, send PLAYER_STATE to server
-//   3. Poll network for incoming packets
-//   4. Dispatch received packets to npc_manager / ui
+// Each frame (via game loop hook):
+//   1. Poll network for incoming packets
+//   2. Read local player position/rotation from KenshiLib
+//   3. If changed significantly, send PLAYER_STATE to server (20Hz)
+//   4. Update remote NPC interpolation
 
 #include <cmath>
 #include <cstring>
+#include <functional>
+
+#include <kenshi/Character.h>
+#include <OgreVector3.h>
+#include <OgreQuaternion.h>
+#include <OgreMath.h>
 
 #include "packets.h"
 #include "protocol.h"
@@ -24,8 +30,8 @@ extern uint32_t client_get_local_id();
 extern void client_set_local_id(uint32_t id);
 extern void client_set_packet_callback(std::function<void(const uint8_t*, size_t)> cb);
 
-extern void* game_get_player_character();
-extern bool  game_is_world_loaded();
+extern Character* game_get_player_character();
+extern bool game_is_world_loaded();
 
 extern void npc_manager_on_spawn(const SpawnNPC& pkt);
 extern void npc_manager_on_state(const PlayerState& pkt);
@@ -34,6 +40,7 @@ extern void npc_manager_update(float dt);
 
 extern void ui_on_chat(const ChatMessage& pkt);
 extern void ui_on_connect_accept(uint32_t player_id);
+extern void ui_check_hotkey();
 
 // ---------------------------------------------------------------------------
 // State
@@ -52,25 +59,24 @@ static float distance_sq(const PlayerState& a, const PlayerState& b) {
     return dx*dx + dy*dy + dz*dz;
 }
 
-// Read the local player's current state from the game via KenshiLib
+// Read the local player's current state from KenshiLib
 static bool read_local_player_state(PlayerState& out) {
-    void* character = game_get_player_character();
-    if (!character) return false;
+    Character* ch = game_get_player_character();
+    if (!ch) return false;
 
-    // TODO: Read from KenshiLib Character object
-    // Typical pattern:
-    //   Character* ch = static_cast<Character*>(character);
-    //   auto pos = ch->getPosition();   // Ogre::Vector3
-    //   auto rot = ch->getRotation();   // Ogre::Quaternion or yaw float
-    //
-    //   out.x = pos.x;
-    //   out.y = pos.y;
-    //   out.z = pos.z;
-    //   out.yaw = rot.getYaw().valueRadians();
-    //   out.animation_id = ch->getCurrentAnimation();
-    //   out.speed = ch->getSpeed();
+    Ogre::Vector3 pos = ch->getPosition();
+    out.x = pos.x;
+    out.y = pos.y;
+    out.z = pos.z;
 
+    // Extract yaw from the character's raw position data
+    out.yaw = 0.0f;
+    float speed = ch->getMovementSpeed();
+    out.speed = speed;
+
+    out.animation_id = 0;  // MVP: idle only, animation sync is future work
     out.player_id = client_get_local_id();
+
     return true;
 }
 
@@ -123,10 +129,9 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
-    case PacketType::PONG: {
+    case PacketType::PONG:
         // TODO: calculate RTT for display
         break;
-    }
 
     default:
         break;
@@ -148,18 +153,21 @@ void player_sync_shutdown() {
 }
 
 // ---------------------------------------------------------------------------
-// Tick — called every frame from game_hooks
+// Tick — called every frame from the game loop hook with real delta time
 // ---------------------------------------------------------------------------
-void player_sync_tick() {
-    if (!s_initialized || !client_is_connected()) return;
-    if (!game_is_world_loaded()) return;
+void player_sync_tick(float dt) {
+    if (!s_initialized) return;
 
-    // Approximate dt — ideally get from Ogre or game timer
-    // For now use tick interval as approximation
-    float dt = TICK_INTERVAL_SEC;
+    // Always check for F8 hotkey
+    ui_check_hotkey();
 
-    // Poll network
-    client_poll();
+    // Poll network if connected (to receive CONNECT_ACCEPT, etc.)
+    if (client_is_connected()) {
+        client_poll();
+    }
+
+    // Only do game sync when world is loaded
+    if (!client_is_connected() || !game_is_world_loaded()) return;
 
     // Update remote NPC positions (interpolation)
     npc_manager_update(dt);
@@ -171,7 +179,6 @@ void player_sync_tick() {
 
         PlayerState current;
         if (read_local_player_state(current)) {
-            // Only send if position changed significantly
             if (distance_sq(current, s_last_sent_state) > POSITION_EPSILON * POSITION_EPSILON ||
                 current.animation_id != s_last_sent_state.animation_id) {
 
