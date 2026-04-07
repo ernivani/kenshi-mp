@@ -40,7 +40,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
 // ---------------------------------------------------------------------------
 // Plugin entry point — called by RE_Kenshi mod loader
 // ---------------------------------------------------------------------------
-extern "C" __declspec(dllexport) void startPlugin() {
+__declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
     // Hook the game's main render loop
