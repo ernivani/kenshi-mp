@@ -46,6 +46,13 @@ extern void host_sync_tick(float dt);
 extern void host_sync_set_host(bool is_host);
 extern bool host_sync_is_host();
 
+extern void admin_panel_init();
+extern void admin_panel_shutdown();
+extern void admin_panel_check_hotkey();
+extern void admin_panel_update(float dt);
+extern void admin_panel_on_player_state(uint32_t player_id, float x, float y, float z);
+extern void admin_panel_on_player_disconnect(uint32_t player_id);
+
 extern void ui_on_chat(const ChatMessage& pkt);
 extern void ui_on_connect_accept(uint32_t player_id);
 extern void ui_on_disconnect();
@@ -116,6 +123,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         if (unpack(data, length, pkt)) {
             if (pkt.player_id != client_get_local_id()) {
                 npc_manager_on_state(pkt);
+                admin_panel_on_player_state(pkt.player_id, pkt.x, pkt.y, pkt.z);
             }
         }
         break;
@@ -125,6 +133,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         PlayerDisconnect pkt;
         if (unpack(data, length, pkt)) {
             npc_manager_on_disconnect(pkt.player_id);
+            admin_panel_on_player_disconnect(pkt.player_id);
         }
         break;
     }
@@ -190,6 +199,7 @@ void player_sync_init() {
     s_send_timer = 0.0f;
     client_set_packet_callback(on_packet_received);
     host_sync_init();
+    admin_panel_init();
     s_initialized = true;
 }
 
@@ -211,6 +221,8 @@ void player_sync_tick(float dt) {
 
     // Always check for hotkeys
     ui_check_hotkey();
+    admin_panel_check_hotkey();
+    admin_panel_update(dt);
 
     // Poll network if connected
     if (client_is_connected()) {
