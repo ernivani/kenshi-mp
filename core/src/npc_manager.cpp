@@ -14,6 +14,8 @@
 #include <kenshi/GameWorld.h>
 #include <kenshi/Character.h>
 #include <kenshi/RootObjectFactory.h>
+#include <kenshi/Faction.h>
+#include <kenshi/PlayerInterface.h>
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
@@ -142,8 +144,9 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
+        Faction* faction = (ou && ou->player) ? ou->player->getFaction() : NULL;
         RootObjectBase* obj = factory->createRandomCharacter(
-            NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+            faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
@@ -232,8 +235,9 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
+        Faction* faction = (ou && ou->player) ? ou->player->getFaction() : NULL;
         RootObjectBase* obj = factory->createRandomCharacter(
-            NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+            faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
