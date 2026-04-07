@@ -15,6 +15,7 @@
 #include <kenshi/Character.h>
 #include <kenshi/RootObjectBase.h>
 #include <kenshi/PlayerInterface.h>
+#include <kenshi/RootObjectFactory.h>
 #include <kenshi/RaceData.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
@@ -75,6 +76,50 @@ void host_sync_set_host(bool is_host) {
 
 bool host_sync_is_host() {
     return s_is_host;
+}
+
+uint32_t host_sync_get_synced_count() {
+    return static_cast<uint32_t>(s_synced_npcs.size());
+}
+
+static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_id);
+
+void host_sync_spawn_test_npc(float x, float y, float z) {
+    if (!ou) return;
+
+    RootObjectFactory* factory = ou->theFactory;
+    if (!factory) return;
+
+    Ogre::Vector3 spawn_pos(x, y, z);
+    RootObjectBase* obj = factory->createRandomCharacter(
+        NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+    );
+
+    Character* npc = dynamic_cast<Character*>(obj);
+    if (npc) {
+        if (npc->ai) {
+            npc->ai = NULL;
+        }
+
+        // Add to synced set so it gets sent to joiners
+        uint64_t key = make_npc_key(npc);
+        uint32_t npc_id = s_next_npc_id++;
+
+        SyncedNPC snpc;
+        snpc.npc_id = npc_id;
+        snpc.last_x = x;
+        snpc.last_y = y;
+        snpc.last_z = z;
+        s_synced_npcs[key] = snpc;
+
+        NPCSpawnRemote spawn;
+        fill_spawn_packet(spawn, npc, npc_id);
+        std::vector<uint8_t> buf = pack(spawn);
+        client_send_reliable(buf.data(), buf.size());
+
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Spawned test NPC " + itos(npc_id) + " at host position");
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ add_library(KenshiMP SHARED
     src/player_sync.cpp
     src/npc_manager.cpp
     src/host_sync.cpp
+    src/admin_panel.cpp
     src/ui.cpp
 )
 

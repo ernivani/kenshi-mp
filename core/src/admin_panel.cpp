@@ -1,0 +1,272 @@
+// admin_panel.cpp — Host admin/debug panel (F10)
+//
+// MyGUI window showing connected players, synced NPC stats,
+// and controls for spawning test NPCs.
+
+#include <string>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <cstring>
+
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
+#include <MyGUI.h>
+#include <OgreLogManager.h>
+
+#include <kenshi/Globals.h>
+#include <kenshi/GameWorld.h>
+#include <kenshi/Character.h>
+#include <kenshi/PlayerInterface.h>
+#include <kenshi/RootObjectFactory.h>
+#include <OgreVector3.h>
+
+#include "packets.h"
+#include "protocol.h"
+#include "serialization.h"
+
+namespace kmp {
+
+extern bool client_is_connected();
+extern uint32_t client_get_local_id();
+extern bool host_sync_is_host();
+extern uint32_t host_sync_get_synced_count();
+extern void host_sync_spawn_test_npc(float x, float y, float z);
+extern Character* game_get_player_character();
+extern RootObjectFactory* game_get_factory();
+extern GameWorld* game_get_world();
+
+// v100-safe int to string
+static std::string itos(uint32_t val) {
+    std::ostringstream ss;
+    ss << val;
+    return ss.str();
+}
+
+static std::string ftos(float val, int precision) {
+    std::ostringstream ss;
+    ss.precision(precision);
+    ss << std::fixed << val;
+    return ss.str();
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+static bool s_initialized = false;
+static bool s_visible = false;
+static float s_update_timer = 0.0f;
+
+// Widgets
+static MyGUI::Window*   s_window = NULL;
+static MyGUI::EditBox*  s_player_list = NULL;
+static MyGUI::TextBox*  s_npc_stats = NULL;
+static MyGUI::Button*   s_spawn_btn = NULL;
+static MyGUI::Button*   s_clear_btn = NULL;
+
+// Track remote player positions (from received PLAYER_STATE packets)
+struct RemotePlayerInfo {
+    uint32_t id;
+    float x, y, z;
+};
+static std::map<uint32_t, RemotePlayerInfo> s_known_players;
+
+// ---------------------------------------------------------------------------
+// Forward declarations
+// ---------------------------------------------------------------------------
+static void on_spawn_clicked(MyGUI::Widget* sender);
+static void on_clear_clicked(MyGUI::Widget* sender);
+
+// ---------------------------------------------------------------------------
+// Init / Shutdown
+// ---------------------------------------------------------------------------
+void admin_panel_init() {
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+    if (!gui) return;
+
+    try {
+
+    s_window = gui->createWidget<MyGUI::Window>(
+        "Kenshi_GenericWindowSkin",
+        MyGUI::IntCoord(50, 50, 500, 420),
+        MyGUI::Align::Default,
+        "Overlapped",
+        "KMP_AdminWindow"
+    );
+    s_window->setCaption("KenshiMP Admin Panel");
+    s_window->setVisible(false);
+
+    // --- Player list header ---
+    MyGUI::TextBox* player_label = s_window->createWidget<MyGUI::TextBox>(
+        "Kenshi_TextboxStandardText",
+        MyGUI::IntCoord(10, 5, 200, 22),
+        MyGUI::Align::Default,
+        "KMP_AdminPlayerLabel"
+    );
+    player_label->setCaption("Connected Players:");
+
+    // Player list (read-only multiline)
+    s_player_list = s_window->createWidget<MyGUI::EditBox>(
+        "Kenshi_EditBoxStandardText",
+        MyGUI::IntCoord(10, 28, 470, 150),
+        MyGUI::Align::Default,
+        "KMP_AdminPlayerList"
+    );
+    s_player_list->setEditReadOnly(true);
+    s_player_list->setEditMultiLine(true);
+
+    // --- NPC stats ---
+    s_npc_stats = s_window->createWidget<MyGUI::TextBox>(
+        "Kenshi_TextboxStandardText",
+        MyGUI::IntCoord(10, 185, 470, 50),
+        MyGUI::Align::Default,
+        "KMP_AdminNPCStats"
+    );
+    s_npc_stats->setCaption("Synced NPCs: 0");
+
+    // --- Controls ---
+    MyGUI::TextBox* ctrl_label = s_window->createWidget<MyGUI::TextBox>(
+        "Kenshi_TextboxStandardText",
+        MyGUI::IntCoord(10, 245, 200, 22),
+        MyGUI::Align::Default,
+        "KMP_AdminCtrlLabel"
+    );
+    ctrl_label->setCaption("Controls:");
+
+    s_spawn_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(10, 270, 220, 35),
+        MyGUI::Align::Default,
+        "KMP_AdminSpawnBtn"
+    );
+    s_spawn_btn->setCaption("Spawn Test NPC Here");
+    s_spawn_btn->eventMouseButtonClick += MyGUI::newDelegate(on_spawn_clicked);
+
+    s_clear_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(250, 270, 220, 35),
+        MyGUI::Align::Default,
+        "KMP_AdminClearBtn"
+    );
+    s_clear_btn->setCaption("Clear All Remote NPCs");
+    s_clear_btn->eventMouseButtonClick += MyGUI::newDelegate(on_clear_clicked);
+
+    s_initialized = true;
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin panel initialized");
+
+    } catch (...) {
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin panel init failed");
+        s_initialized = false;
+    }
+}
+
+void admin_panel_shutdown() {
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+    if (gui && s_window) {
+        gui->destroyWidget(s_window);
+        s_window = NULL;
+    }
+    s_initialized = false;
+    s_known_players.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Toggle (F10)
+// ---------------------------------------------------------------------------
+void admin_panel_toggle() {
+    if (!s_initialized) return;
+    if (!host_sync_is_host()) return;
+
+    s_visible = !s_visible;
+    if (s_window) s_window->setVisible(s_visible);
+}
+
+void admin_panel_check_hotkey() {
+    static bool s_f10_was_down = false;
+    bool f10_down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+    if (f10_down && !s_f10_was_down) {
+        admin_panel_toggle();
+    }
+    s_f10_was_down = f10_down;
+}
+
+// ---------------------------------------------------------------------------
+// Track remote players (called from packet dispatch)
+// ---------------------------------------------------------------------------
+void admin_panel_on_player_state(uint32_t player_id, float x, float y, float z) {
+    RemotePlayerInfo info;
+    info.id = player_id;
+    info.x = x;
+    info.y = y;
+    info.z = z;
+    s_known_players[player_id] = info;
+}
+
+void admin_panel_on_player_disconnect(uint32_t player_id) {
+    s_known_players.erase(player_id);
+}
+
+// ---------------------------------------------------------------------------
+// Update display (called every frame, but only refreshes every 0.5s)
+// ---------------------------------------------------------------------------
+void admin_panel_update(float dt) {
+    if (!s_initialized || !s_visible) return;
+
+    s_update_timer += dt;
+    if (s_update_timer < 0.5f) return;
+    s_update_timer = 0.0f;
+
+    // --- Update player list ---
+    if (s_player_list) {
+        std::string text;
+
+        // Local player (host)
+        Character* local_ch = game_get_player_character();
+        if (local_ch) {
+            Ogre::Vector3 pos = local_ch->getPosition();
+            text += "ID " + itos(client_get_local_id()) + " | Player (HOST) | "
+                + ftos(pos.x, 0) + ", " + ftos(pos.y, 0) + ", " + ftos(pos.z, 0) + "\n";
+        }
+
+        // Remote players
+        std::map<uint32_t, RemotePlayerInfo>::iterator it;
+        for (it = s_known_players.begin(); it != s_known_players.end(); ++it) {
+            text += "ID " + itos(it->second.id) + " | Player | "
+                + ftos(it->second.x, 0) + ", " + ftos(it->second.y, 0) + ", "
+                + ftos(it->second.z, 0) + "\n";
+        }
+
+        if (text.empty()) {
+            text = "(no players connected)";
+        }
+
+        s_player_list->setCaption(text);
+    }
+
+    // --- Update NPC stats ---
+    if (s_npc_stats) {
+        uint32_t npc_count = host_sync_get_synced_count();
+        std::string stats = "Synced NPCs: " + itos(npc_count);
+        s_npc_stats->setCaption(stats);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Button callbacks
+// ---------------------------------------------------------------------------
+static void on_spawn_clicked(MyGUI::Widget* sender) {
+    Character* ch = game_get_player_character();
+    if (!ch) return;
+
+    Ogre::Vector3 pos = ch->getPosition();
+    host_sync_spawn_test_npc(pos.x, pos.y, pos.z);
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin: Spawned test NPC at player position");
+}
+
+static void on_clear_clicked(MyGUI::Widget* sender) {
+    // TODO: implement clear all remote NPCs
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin: Clear remote NPCs (not yet implemented)");
+}
+
+} // namespace kmp
