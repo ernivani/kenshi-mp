@@ -1,8 +1,9 @@
 // plugin.cpp — KenshiLib plugin entry point for KenshiMP
 //
 // RE_Kenshi mod loader calls startPlugin() when the mod is loaded.
-// We use Ogre::FrameListener for per-frame updates instead of
-// KenshiLib::AddHook to avoid VS2010/VS2022 ABI issues.
+// We use Ogre::FrameListener for per-frame updates.
+// Subsystem init is deferred to the first frame since MyGUI and
+// game systems aren't ready during plugin load.
 
 #include <OgreRoot.h>
 #include <OgreFrameListener.h>
@@ -27,9 +28,23 @@ namespace kmp {
 class KenshiMPFrameListener : public Ogre::FrameListener {
 public:
     bool frameRenderingQueued(const Ogre::FrameEvent& evt) override {
+        // Defer subsystem init to first frame (MyGUI not ready during plugin load)
+        if (!m_initialized) {
+            m_initialized = true;
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialising subsystems...");
+            kmp::client_init();
+            kmp::npc_manager_init();
+            kmp::player_sync_init();
+            kmp::ui_init();
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready");
+        }
+
         kmp::player_sync_tick(evt.timeSinceLastFrame);
         return true;
     }
+
+private:
+    bool m_initialized = false;
 };
 
 static KenshiMPFrameListener* s_listener = nullptr;
@@ -40,15 +55,9 @@ static KenshiMPFrameListener* s_listener = nullptr;
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
-    // Register frame listener for per-frame updates
+    // Register frame listener — actual init happens on first frame
     s_listener = new KenshiMPFrameListener();
     Ogre::Root::getSingleton().addFrameListener(s_listener);
-
-    // Init subsystems
-    kmp::client_init();
-    kmp::npc_manager_init();
-    kmp::player_sync_init();
-    kmp::ui_init();
 
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK");
 }
