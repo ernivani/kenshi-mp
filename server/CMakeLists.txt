@@ -12,7 +12,11 @@ target_link_libraries(kenshi-mp-server PRIVATE kenshi-mp-common)
 # ENet
 if(ENET_DIR)
     target_include_directories(kenshi-mp-server PRIVATE ${ENET_DIR}/include)
-    target_link_directories(kenshi-mp-server PRIVATE ${ENET_DIR}/lib)
+    target_link_directories(kenshi-mp-server PRIVATE
+        ${ENET_DIR}/lib
+        ${ENET_DIR}/build/Release
+        ${ENET_DIR}/build/Debug
+    )
     target_link_libraries(kenshi-mp-server PRIVATE enet)
 endif()
 

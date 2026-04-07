@@ -78,7 +78,11 @@ endif()
 # ENet
 if(ENET_DIR)
     target_include_directories(KenshiMP PRIVATE ${ENET_DIR}/include)
-    target_link_directories(KenshiMP PRIVATE ${ENET_DIR}/lib)
+    target_link_directories(KenshiMP PRIVATE
+        ${ENET_DIR}/lib
+        ${ENET_DIR}/build/Release
+        ${ENET_DIR}/build/Debug
+    )
     target_link_libraries(KenshiMP PRIVATE enet)
 endif()
 
