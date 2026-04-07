@@ -34,12 +34,14 @@ struct PlayerSession {
     char        model[MAX_MODEL_LENGTH];
     float       x, y, z;
     float       yaw;
+    bool        is_host;
     std::chrono::steady_clock::time_point last_activity;
 };
 
 static std::map<uint32_t, PlayerSession> s_sessions;        // id -> session
 static std::map<ENetPeer*, uint32_t>     s_peer_to_id;      // peer -> id
 static uint32_t s_next_id = 1;
+static uint32_t s_host_id = 0;  // player ID of the host (0 = no host)
 
 // ---------------------------------------------------------------------------
 // Init
@@ -67,6 +69,10 @@ void session_on_disconnect(ENetPeer* peer) {
     if (it == s_peer_to_id.end()) return;
 
     uint32_t id = it->second;
+    if (s_host_id == id) {
+        s_host_id = 0;
+        spdlog::info("Host player disconnected");
+    }
     spdlog::info("Player {} ('{}') disconnected", id, s_sessions[id].name);
 
     // Notify all other clients
@@ -108,6 +114,11 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     session.model[MAX_MODEL_LENGTH - 1] = '\0';
     session.x = session.y = session.z = session.yaw = 0.0f;
     session.last_activity = std::chrono::steady_clock::now();
+    session.is_host = (req.is_host != 0);
+    if (session.is_host && s_host_id == 0) {
+        s_host_id = id;
+        spdlog::info("Player {} is the HOST", id);
+    }
 
     s_sessions[id] = session;
     s_peer_to_id[peer] = id;
@@ -207,6 +218,25 @@ static void handle_ping(ENetPeer* peer, const uint8_t* data, size_t length) {
     relay_send_to(peer, buf.data(), buf.size(), false);
 }
 
+static void handle_npc_packet(ENetPeer* peer, const uint8_t* data, size_t length, bool reliable) {
+    auto it = s_peer_to_id.find(peer);
+    if (it == s_peer_to_id.end()) return;
+
+    uint32_t id = it->second;
+
+    // Only accept NPC packets from the host
+    if (id != s_host_id) {
+        spdlog::warn("Non-host player {} tried to send NPC packet, ignoring", id);
+        return;
+    }
+
+    // Update activity timestamp
+    s_sessions[id].last_activity = std::chrono::steady_clock::now();
+
+    // Relay to all non-host players
+    relay_broadcast(peer, data, length, reliable);
+}
+
 void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     PacketHeader header;
     if (!peek_header(data, length, header)) return;
@@ -224,6 +254,15 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         break;
     case PacketType::PING:
         handle_ping(peer, data, length);
+        break;
+    case PacketType::NPC_SPAWN_REMOTE:
+        handle_npc_packet(peer, data, length, true);
+        break;
+    case PacketType::NPC_BATCH_STATE:
+        handle_npc_packet(peer, data, length, false);
+        break;
+    case PacketType::NPC_DESPAWN_REMOTE:
+        handle_npc_packet(peer, data, length, true);
         break;
     default:
         spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header.type));
