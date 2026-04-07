@@ -1,15 +1,17 @@
-// main.cpp — KenshiMP Launcher / Injector
+// main.cpp — KenshiMP Launcher
 //
-// This launcher:
-//   1. Finds the Kenshi install directory (Steam registry or manual path)
-//   2. Backs up Plugins_x64.cfg
-//   3. Appends "Plugin=KenshiMP" to the config
-//   4. Copies KenshiMP.dll to the Kenshi directory if needed
-//   5. Launches kenshi_x64.exe
-//   6. On exit, restores the original Plugins_x64.cfg
+// Deploys KenshiMP.dll to Kenshi's mods folder and launches the game.
+// Requires RE_Kenshi (KenshiLib mod loader) to be installed.
+//
+// Flow:
+//   1. Find Kenshi install (Steam registry or CLI arg)
+//   2. Check RE_Kenshi is installed
+//   3. Create mods/KenshiMP/ folder
+//   4. Copy KenshiMP.dll into it
+//   5. Launch kenshi_x64.exe
+//   6. Wait for exit
 
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <filesystem>
 #include <cstdlib>
@@ -19,12 +21,15 @@
 
 namespace fs = std::filesystem;
 
+static const char* DLL_NAME = "KenshiMP.dll";
+static const char* MOD_FOLDER = "mods";
+static const char* MOD_NAME = "KenshiMP";
+
 // ---------------------------------------------------------------------------
 // Find Kenshi install via Steam registry
 // ---------------------------------------------------------------------------
 static std::string find_kenshi_steam() {
     HKEY key;
-    // Kenshi Steam App ID: 233860
     const char* reg_path = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 233860";
 
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, reg_path, 0, KEY_READ | KEY_WOW64_64KEY, &key) == ERROR_SUCCESS) {
@@ -41,105 +46,66 @@ static std::string find_kenshi_steam() {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin config management
+// Check if RE_Kenshi (mod loader) is installed
 // ---------------------------------------------------------------------------
-static const char* PLUGIN_CFG    = "Plugins_x64.cfg";
-static const char* PLUGIN_BACKUP = "Plugins_x64.cfg.kmp_backup";
-static const char* PLUGIN_LINE   = "Plugin=KenshiMP";
-static const char* DLL_NAME      = "KenshiMP.dll";
-
-static bool config_has_plugin(const fs::path& cfg_path) {
-    std::ifstream file(cfg_path);
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line.find(PLUGIN_LINE) != std::string::npos) {
-            return true;
-        }
+static bool check_re_kenshi(const fs::path& kenshi_dir) {
+    auto mods_dir = kenshi_dir / MOD_FOLDER;
+    if (!fs::exists(mods_dir)) {
+        std::cout << "Note: '" << MOD_FOLDER << "' folder not found. Creating it.\n";
+        std::cout << "Make sure RE_Kenshi (KenshiLib mod loader) is installed!\n";
+        std::cout << "Without it, KenshiMP.dll will not be loaded.\n\n";
     }
-    return false;
+    return true;
 }
 
-static bool backup_config(const fs::path& kenshi_dir) {
-    auto cfg = kenshi_dir / PLUGIN_CFG;
-    auto bak = kenshi_dir / PLUGIN_BACKUP;
+// ---------------------------------------------------------------------------
+// Deploy DLL to mods folder
+// ---------------------------------------------------------------------------
+static bool deploy_dll(const fs::path& kenshi_dir) {
+    auto mod_dir = kenshi_dir / MOD_FOLDER / MOD_NAME;
+    auto dst = mod_dir / DLL_NAME;
 
-    if (!fs::exists(cfg)) {
-        std::cerr << "Error: " << cfg << " not found\n";
-        return false;
-    }
-
+    // Create mod directory
     std::error_code ec;
-    fs::copy_file(cfg, bak, fs::copy_options::overwrite_existing, ec);
+    fs::create_directories(mod_dir, ec);
     if (ec) {
-        std::cerr << "Error backing up config: " << ec.message() << "\n";
-        return false;
-    }
-    return true;
-}
-
-static bool patch_config(const fs::path& kenshi_dir) {
-    auto cfg = kenshi_dir / PLUGIN_CFG;
-
-    if (config_has_plugin(cfg)) {
-        std::cout << "Plugin already in config, skipping patch\n";
-        return true;
-    }
-
-    std::ofstream file(cfg, std::ios::app);
-    if (!file.is_open()) {
-        std::cerr << "Error: cannot open " << cfg << " for writing\n";
+        std::cerr << "Error creating mod directory: " << ec.message() << "\n";
         return false;
     }
 
-    file << "\n" << PLUGIN_LINE << "\n";
-    std::cout << "Patched " << PLUGIN_CFG << "\n";
-    return true;
-}
+    // Find the DLL (next to launcher, or in parent, or in build output)
+    fs::path src;
+    fs::path candidates[] = {
+        fs::path(DLL_NAME),
+        fs::path("..") / DLL_NAME,
+        fs::path("..") / "core" / "Release" / DLL_NAME,
+        fs::path("Release") / DLL_NAME,
+    };
 
-static void restore_config(const fs::path& kenshi_dir) {
-    auto cfg = kenshi_dir / PLUGIN_CFG;
-    auto bak = kenshi_dir / PLUGIN_BACKUP;
-
-    if (fs::exists(bak)) {
-        std::error_code ec;
-        fs::copy_file(bak, cfg, fs::copy_options::overwrite_existing, ec);
-        if (!ec) {
-            fs::remove(bak, ec);
-            std::cout << "Restored original " << PLUGIN_CFG << "\n";
+    for (const auto& candidate : candidates) {
+        if (fs::exists(candidate)) {
+            src = candidate;
+            break;
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// Copy DLL if needed
-// ---------------------------------------------------------------------------
-static bool ensure_dll(const fs::path& kenshi_dir) {
-    auto dst = kenshi_dir / DLL_NAME;
-
-    // Check if DLL exists next to the launcher
-    auto src = fs::path(DLL_NAME);
-    if (!fs::exists(src)) {
-        // Try in parent directory or build output
-        src = fs::path("..") / DLL_NAME;
-    }
-
-    if (!fs::exists(src)) {
+    if (src.empty()) {
         if (fs::exists(dst)) {
-            std::cout << "Using existing " << DLL_NAME << " in Kenshi directory\n";
+            std::cout << "Using existing " << DLL_NAME << " in mod folder\n";
             return true;
         }
-        std::cerr << "Error: " << DLL_NAME << " not found\n";
+        std::cerr << "Error: " << DLL_NAME << " not found.\n";
+        std::cerr << "Place it next to this launcher or build it first.\n";
         return false;
     }
 
-    std::error_code ec;
     fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
     if (ec) {
         std::cerr << "Error copying DLL: " << ec.message() << "\n";
         return false;
     }
 
-    std::cout << "Copied " << DLL_NAME << " to Kenshi directory\n";
+    std::cout << "Deployed " << DLL_NAME << " to " << mod_dir << "\n";
     return true;
 }
 
@@ -197,7 +163,6 @@ int main(int argc, char* argv[]) {
 
     // Determine Kenshi directory
     std::string kenshi_path;
-
     if (argc > 1) {
         kenshi_path = argv[1];
     } else {
@@ -217,26 +182,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Step 1: Backup config
-    if (!backup_config(kenshi_dir)) return 1;
+    // Check for mod loader
+    check_re_kenshi(kenshi_dir);
 
-    // Step 2: Copy DLL
-    if (!ensure_dll(kenshi_dir)) {
-        restore_config(kenshi_dir);
-        return 1;
-    }
+    // Deploy DLL
+    if (!deploy_dll(kenshi_dir)) return 1;
 
-    // Step 3: Patch config
-    if (!patch_config(kenshi_dir)) {
-        restore_config(kenshi_dir);
-        return 1;
-    }
-
-    // Step 4: Launch and wait
-    int result = launch_kenshi(kenshi_dir);
-
-    // Step 5: Restore config
-    restore_config(kenshi_dir);
-
-    return result;
+    // Launch
+    return launch_kenshi(kenshi_dir);
 }
