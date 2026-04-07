@@ -78,9 +78,11 @@ void ui_init() {
         return;
     }
 
+    try {
+
     // --- Connect dialog ---
     s_connect_window = gui->createWidget<MyGUI::Window>(
-        "WindowCSX",
+        "Kenshi_GenericWindowSkin",
         MyGUI::IntCoord(100, 100, 320, 200),
         MyGUI::Align::Default,
         "Overlapped",
@@ -91,7 +93,7 @@ void ui_init() {
 
     // Host label + input
     auto* host_label = s_connect_window->createWidget<MyGUI::TextBox>(
-        "TextBox",
+        "Kenshi_TextboxStandardText",
         MyGUI::IntCoord(10, 10, 60, 26),
         MyGUI::Align::Default,
         "KMP_HostLabel"
@@ -99,7 +101,7 @@ void ui_init() {
     host_label->setCaption("Host:");
 
     s_host_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "EditBox",
+        "Kenshi_EditBoxStandardText",
         MyGUI::IntCoord(75, 10, 220, 26),
         MyGUI::Align::Default,
         "KMP_HostInput"
@@ -108,7 +110,7 @@ void ui_init() {
 
     // Port label + input
     auto* port_label = s_connect_window->createWidget<MyGUI::TextBox>(
-        "TextBox",
+        "Kenshi_TextboxStandardText",
         MyGUI::IntCoord(10, 44, 60, 26),
         MyGUI::Align::Default,
         "KMP_PortLabel"
@@ -116,7 +118,7 @@ void ui_init() {
     port_label->setCaption("Port:");
 
     s_port_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "EditBox",
+        "Kenshi_EditBoxStandardText",
         MyGUI::IntCoord(75, 44, 220, 26),
         MyGUI::Align::Default,
         "KMP_PortInput"
@@ -125,7 +127,7 @@ void ui_init() {
 
     // Connect button
     s_connect_btn = s_connect_window->createWidget<MyGUI::Button>(
-        "Button",
+        "Kenshi_Button1Skin",
         MyGUI::IntCoord(10, 80, 140, 30),
         MyGUI::Align::Default,
         "KMP_ConnectBtn"
@@ -135,7 +137,7 @@ void ui_init() {
 
     // Disconnect button
     s_disconnect_btn = s_connect_window->createWidget<MyGUI::Button>(
-        "Button",
+        "Kenshi_Button1Skin",
         MyGUI::IntCoord(160, 80, 140, 30),
         MyGUI::Align::Default,
         "KMP_DisconnectBtn"
@@ -145,7 +147,7 @@ void ui_init() {
 
     // --- Chat window ---
     s_chat_window = gui->createWidget<MyGUI::Window>(
-        "WindowCSX",
+        "Kenshi_GenericWindowSkin",
         MyGUI::IntCoord(100, 320, 400, 250),
         MyGUI::Align::Default,
         "Overlapped",
@@ -156,7 +158,7 @@ void ui_init() {
 
     // Chat display (read-only, multiline)
     s_chat_display = s_chat_window->createWidget<MyGUI::EditBox>(
-        "EditBoxStretch",
+        "Kenshi_EditBoxStandardText",
         MyGUI::IntCoord(5, 5, 380, 170),
         MyGUI::Align::Stretch,
         "KMP_ChatDisplay"
@@ -167,7 +169,7 @@ void ui_init() {
 
     // Chat input
     s_chat_input = s_chat_window->createWidget<MyGUI::EditBox>(
-        "EditBox",
+        "Kenshi_EditBoxStandardText",
         MyGUI::IntCoord(5, 180, 310, 26),
         MyGUI::Align::Default,
         "KMP_ChatInput"
@@ -176,7 +178,7 @@ void ui_init() {
 
     // Send button
     s_chat_send_btn = s_chat_window->createWidget<MyGUI::Button>(
-        "Button",
+        "Kenshi_Button1Skin",
         MyGUI::IntCoord(320, 180, 70, 26),
         MyGUI::Align::Default,
         "KMP_ChatSendBtn"
@@ -186,13 +188,13 @@ void ui_init() {
 
     // --- Status text (top of screen) ---
     s_status_text = gui->createWidget<MyGUI::TextBox>(
-        "TextBox",
+        "Kenshi_TextboxStandardText",
         MyGUI::IntCoord(10, 5, 400, 24),
         MyGUI::Align::Default,
         "Overlapped",
         "KMP_StatusText"
     );
-    s_status_text->setCaption("KenshiMP — Press F8 to open");
+    s_status_text->setCaption("KenshiMP - Press F8 to open");
     s_status_text->setTextColour(MyGUI::Colour(0.8f, 1.0f, 0.8f));
     s_status_text->setVisible(true);
 
@@ -200,6 +202,18 @@ void ui_init() {
     s_ui_visible = false;
 
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] UI initialized");
+
+    } catch (std::exception& e) {
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] UI init failed: ") + e.what()
+        );
+        s_ui_initialized = false;
+    } catch (...) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] UI init failed: unknown exception"
+        );
+        s_ui_initialized = false;
+    }
 }
 
 void ui_shutdown() {

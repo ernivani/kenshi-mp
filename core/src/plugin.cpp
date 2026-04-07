@@ -32,9 +32,13 @@ public:
         if (!m_initialized) {
             m_initialized = true;
             Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialising subsystems...");
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] client_init...");
             kmp::client_init();
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] npc_manager_init...");
             kmp::npc_manager_init();
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] player_sync_init...");
             kmp::player_sync_init();
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] ui_init...");
             kmp::ui_init();
             Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready");
         }
