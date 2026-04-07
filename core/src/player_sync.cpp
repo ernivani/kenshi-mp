@@ -80,62 +80,55 @@ static bool read_local_player_state(PlayerState& out) {
 // Packet dispatch
 // ---------------------------------------------------------------------------
 static void on_packet_received(const uint8_t* data, size_t length) {
-    auto header = peek_header(data, length);
-    if (!header || !validate_version(*header)) return;
+    PacketHeader header;
+    if (!peek_header(data, length, header)) return;
+    if (!validate_version(header)) return;
 
-    Ogre::LogManager::getSingleton().logMessage(
-        "[KenshiMP] Packet received: type=0x" +
-        std::to_string(static_cast<int>(header->type)));
-
-    switch (header->type) {
+    switch (header.type) {
     case PacketType::CONNECT_ACCEPT: {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Processing CONNECT_ACCEPT");
-        auto pkt = unpack<ConnectAccept>(data, length);
-        if (pkt) {
-            client_set_local_id(pkt->player_id);
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Local ID set to " + std::to_string(pkt->player_id));
-            ui_on_connect_accept(pkt->player_id);
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] CONNECT_ACCEPT done");
+        ConnectAccept pkt;
+        if (unpack(data, length, pkt)) {
+            client_set_local_id(pkt.player_id);
+            ui_on_connect_accept(pkt.player_id);
         }
         break;
     }
 
     case PacketType::SPAWN_NPC: {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Processing SPAWN_NPC");
-        auto pkt = unpack<SpawnNPC>(data, length);
-        if (pkt) {
-            npc_manager_on_spawn(*pkt);
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] SPAWN_NPC done");
+        SpawnNPC pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_spawn(pkt);
         }
         break;
     }
 
     case PacketType::PLAYER_STATE: {
-        auto pkt = unpack<PlayerState>(data, length);
-        if (pkt && pkt->player_id != client_get_local_id()) {
-            npc_manager_on_state(*pkt);
+        PlayerState pkt;
+        if (unpack(data, length, pkt)) {
+            if (pkt.player_id != client_get_local_id()) {
+                npc_manager_on_state(pkt);
+            }
         }
         break;
     }
 
     case PacketType::PLAYER_DISCONNECT: {
-        auto pkt = unpack<PlayerDisconnect>(data, length);
-        if (pkt) {
-            npc_manager_on_disconnect(pkt->player_id);
+        PlayerDisconnect pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_disconnect(pkt.player_id);
         }
         break;
     }
 
     case PacketType::CHAT_MESSAGE: {
-        auto pkt = unpack<ChatMessage>(data, length);
-        if (pkt) {
-            ui_on_chat(*pkt);
+        ChatMessage pkt;
+        if (unpack(data, length, pkt)) {
+            ui_on_chat(pkt);
         }
         break;
     }
 
     case PacketType::PONG:
-        // TODO: calculate RTT for display
         break;
 
     default:
