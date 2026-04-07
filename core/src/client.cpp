@@ -6,9 +6,6 @@
 #include <enet/enet.h>
 #include <cstring>
 #include <string>
-#include <functional>
-#include <queue>
-#include <mutex>
 
 #include "packets.h"
 #include "protocol.h"
@@ -19,13 +16,13 @@ namespace kmp {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-static ENetHost*   s_client  = nullptr;
-static ENetPeer*   s_peer    = nullptr;
+static ENetHost*   s_client  = NULL;
+static ENetPeer*   s_peer    = NULL;
 static bool        s_connected = false;
 static uint32_t    s_local_id  = 0;
 
 // Callback for received packets — set by player_sync
-using PacketCallback = std::function<void(const uint8_t* data, size_t length)>;
+typedef void (*PacketCallback)(const uint8_t* data, size_t length);
 static PacketCallback s_on_packet;
 
 // ---------------------------------------------------------------------------
@@ -38,7 +35,7 @@ void client_init() {
     }
 
     s_client = enet_host_create(
-        nullptr,            // client, no binding
+        NULL,            // client, no binding
         1,                  // one outgoing connection
         CHANNEL_COUNT,
         0,                  // unlimited incoming bandwidth
@@ -49,11 +46,11 @@ void client_init() {
 void client_shutdown() {
     if (s_peer) {
         enet_peer_disconnect_now(s_peer, 0);
-        s_peer = nullptr;
+        s_peer = NULL;
     }
     if (s_client) {
         enet_host_destroy(s_client);
-        s_client = nullptr;
+        s_client = NULL;
     }
     enet_deinitialize();
     s_connected = false;
@@ -81,7 +78,7 @@ bool client_connect(const char* host, uint16_t port) {
     }
 
     enet_peer_reset(s_peer);
-    s_peer = nullptr;
+    s_peer = NULL;
     return false;
 }
 
@@ -102,7 +99,7 @@ void client_disconnect() {
     }
 
     enet_peer_reset(s_peer);
-    s_peer = nullptr;
+    s_peer = NULL;
     s_connected = false;
     s_local_id = 0;
 }
@@ -160,7 +157,7 @@ void client_poll() {
 
         case ENET_EVENT_TYPE_DISCONNECT:
             s_connected = false;
-            s_peer = nullptr;
+            s_peer = NULL;
             s_local_id = 0;
             break;
 

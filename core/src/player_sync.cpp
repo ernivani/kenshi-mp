@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <functional>
 #include <string>
 
 #include <kenshi/Character.h>
@@ -25,7 +24,8 @@ extern void client_send_reliable(const uint8_t* data, size_t length);
 extern bool client_is_connected();
 extern uint32_t client_get_local_id();
 extern void client_set_local_id(uint32_t id);
-extern void client_set_packet_callback(std::function<void(const uint8_t*, size_t)> cb);
+typedef void (*PacketCallback)(const uint8_t* data, size_t length);
+extern void client_set_packet_callback(PacketCallback cb);
 
 extern Character* game_get_player_character();
 extern bool game_is_world_loaded();
