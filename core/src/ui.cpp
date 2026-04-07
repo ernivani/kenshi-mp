@@ -87,6 +87,10 @@ void ui_init() {
 
     try {
 
+    MyGUI::Colour textCol(0.08f, 0.03f, 0.02f);
+    std::string stdFont = "Kenshi_StandardFont_Medium";
+    std::string btnFont = "Kenshi_PaintedTextFont_Medium";
+
     // --- Connect dialog ---
     s_connect_window = gui->createWidget<MyGUI::Window>(
         "Kenshi_GenericWindowSkin",
@@ -100,37 +104,45 @@ void ui_init() {
 
     // Host label + input
     MyGUI::TextBox* host_label = s_connect_window->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 10, 60, 26),
         MyGUI::Align::Default,
         "KMP_HostLabel"
     );
     host_label->setCaption("Host:");
+    host_label->setFontName(stdFont);
+    host_label->setTextColour(textCol);
 
     s_host_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxStandardText",
+        "Kenshi_EditBoxEmptySkin",
         MyGUI::IntCoord(75, 10, 220, 26),
         MyGUI::Align::Default,
         "KMP_HostInput"
     );
     s_host_input->setCaption("127.0.0.1");
+    s_host_input->setFontName(stdFont);
+    s_host_input->setTextColour(textCol);
 
     // Port label + input
     MyGUI::TextBox* port_label = s_connect_window->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 44, 60, 26),
         MyGUI::Align::Default,
         "KMP_PortLabel"
     );
     port_label->setCaption("Port:");
+    port_label->setFontName(stdFont);
+    port_label->setTextColour(textCol);
 
     s_port_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxStandardText",
+        "Kenshi_EditBoxEmptySkin",
         MyGUI::IntCoord(75, 44, 220, 26),
         MyGUI::Align::Default,
         "KMP_PortInput"
     );
     s_port_input->setCaption("7777");
+    s_port_input->setFontName(stdFont);
+    s_port_input->setTextColour(textCol);
 
     // Connect button
     s_connect_btn = s_connect_window->createWidget<MyGUI::Button>(
@@ -140,6 +152,8 @@ void ui_init() {
         "KMP_ConnectBtn"
     );
     s_connect_btn->setCaption("Connect");
+    s_connect_btn->setFontName(btnFont);
+    s_connect_btn->setTextAlign(MyGUI::Align::Center);
     s_connect_btn->eventMouseButtonClick += MyGUI::newDelegate(on_connect_clicked);
 
     // Disconnect button
@@ -150,6 +164,8 @@ void ui_init() {
         "KMP_DisconnectBtn"
     );
     s_disconnect_btn->setCaption("Disconnect");
+    s_disconnect_btn->setFontName(btnFont);
+    s_disconnect_btn->setTextAlign(MyGUI::Align::Center);
     s_disconnect_btn->eventMouseButtonClick += MyGUI::newDelegate(on_disconnect_clicked);
 
     // --- Chat window ---
@@ -165,7 +181,7 @@ void ui_init() {
 
     // Chat display (read-only, multiline)
     s_chat_display = s_chat_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxStandardText",
+        "Kenshi_EditBoxEmptySkin",
         MyGUI::IntCoord(5, 5, 380, 170),
         MyGUI::Align::Stretch,
         "KMP_ChatDisplay"
@@ -173,14 +189,18 @@ void ui_init() {
     s_chat_display->setEditReadOnly(true);
     s_chat_display->setEditMultiLine(true);
     s_chat_display->setEditWordWrap(true);
+    s_chat_display->setFontName(stdFont);
+    s_chat_display->setTextColour(textCol);
 
     // Chat input
     s_chat_input = s_chat_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxStandardText",
+        "Kenshi_EditBoxEmptySkin",
         MyGUI::IntCoord(5, 180, 310, 26),
         MyGUI::Align::Default,
         "KMP_ChatInput"
     );
+    s_chat_input->setFontName(stdFont);
+    s_chat_input->setTextColour(textCol);
     s_chat_input->eventKeyButtonPressed += MyGUI::newDelegate(on_chat_key_press);
 
     // Send button
@@ -191,17 +211,20 @@ void ui_init() {
         "KMP_ChatSendBtn"
     );
     s_chat_send_btn->setCaption("Send");
+    s_chat_send_btn->setFontName(btnFont);
+    s_chat_send_btn->setTextAlign(MyGUI::Align::Center);
     s_chat_send_btn->eventMouseButtonClick += MyGUI::newDelegate(on_chat_send_clicked);
 
     // --- Status text (top of screen) ---
     s_status_text = gui->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 5, 400, 24),
         MyGUI::Align::Default,
         "Overlapped",
         "KMP_StatusText"
     );
     s_status_text->setCaption("KenshiMP - Press F8 to open");
+    s_status_text->setFontName(stdFont);
     s_status_text->setTextColour(MyGUI::Colour(0.8f, 1.0f, 0.8f));
     s_status_text->setVisible(true);
 

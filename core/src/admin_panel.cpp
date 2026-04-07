@@ -97,42 +97,53 @@ void admin_panel_init() {
     s_window->setCaption("KenshiMP Admin Panel");
     s_window->setVisible(false);
 
+    MyGUI::Colour textCol(0.08f, 0.03f, 0.02f);
+    std::string font = "Kenshi_StandardFont_Medium";
+
     // --- Player list header ---
     MyGUI::TextBox* player_label = s_window->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 5, 200, 22),
         MyGUI::Align::Default,
         "KMP_AdminPlayerLabel"
     );
     player_label->setCaption("Connected Players:");
+    player_label->setFontName(font);
+    player_label->setTextColour(textCol);
 
     // Player list (read-only multiline)
     s_player_list = s_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxStandardText",
+        "Kenshi_EditBoxEmptySkin",
         MyGUI::IntCoord(10, 28, 470, 150),
         MyGUI::Align::Default,
         "KMP_AdminPlayerList"
     );
     s_player_list->setEditReadOnly(true);
     s_player_list->setEditMultiLine(true);
+    s_player_list->setFontName(font);
+    s_player_list->setTextColour(textCol);
 
     // --- NPC stats ---
     s_npc_stats = s_window->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 185, 470, 50),
         MyGUI::Align::Default,
         "KMP_AdminNPCStats"
     );
     s_npc_stats->setCaption("Synced NPCs: 0");
+    s_npc_stats->setFontName(font);
+    s_npc_stats->setTextColour(textCol);
 
     // --- Controls ---
     MyGUI::TextBox* ctrl_label = s_window->createWidget<MyGUI::TextBox>(
-        "Kenshi_TextboxStandardText",
+        "Kenshi_TextBoxEmptySkin",
         MyGUI::IntCoord(10, 245, 200, 22),
         MyGUI::Align::Default,
         "KMP_AdminCtrlLabel"
     );
     ctrl_label->setCaption("Controls:");
+    ctrl_label->setFontName(font);
+    ctrl_label->setTextColour(textCol);
 
     s_spawn_btn = s_window->createWidget<MyGUI::Button>(
         "Kenshi_Button1Skin",
@@ -141,6 +152,8 @@ void admin_panel_init() {
         "KMP_AdminSpawnBtn"
     );
     s_spawn_btn->setCaption("Spawn Test NPC Here");
+    s_spawn_btn->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_spawn_btn->setTextAlign(MyGUI::Align::Center);
     s_spawn_btn->eventMouseButtonClick += MyGUI::newDelegate(on_spawn_clicked);
 
     s_clear_btn = s_window->createWidget<MyGUI::Button>(
@@ -150,6 +163,8 @@ void admin_panel_init() {
         "KMP_AdminClearBtn"
     );
     s_clear_btn->setCaption("Clear All Remote NPCs");
+    s_clear_btn->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_clear_btn->setTextAlign(MyGUI::Align::Center);
     s_clear_btn->eventMouseButtonClick += MyGUI::newDelegate(on_clear_clicked);
 
     s_initialized = true;
