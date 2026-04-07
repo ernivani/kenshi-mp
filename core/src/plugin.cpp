@@ -1,21 +1,20 @@
-// plugin.cpp — Ogre3D plugin entry point for KenshiMP
+// plugin.cpp — KenshiLib plugin entry point for KenshiMP
 //
-// Kenshi loads plugins listed in Plugins_x64.cfg. Each plugin must export
-// dllStartPlugin / dllStopPlugin and provide an Ogre::Plugin implementation.
+// RE_Kenshi mod loader calls startPlugin() when the mod is loaded.
+// We hook the game's main render loop to run our sync every frame.
 
-#include <OgrePlugin.h>
-#include <OgreRoot.h>
-#include <OgreRenderWindow.h>
+#include <kenshi/Globals.h>
+#include <kenshi/GameWorld.h>
+#include <core/Functions.h>
 #include <OgreLogManager.h>
 
 // Forward declarations for our subsystems
 namespace kmp {
     void client_init();
     void client_shutdown();
-    void game_hooks_install();
-    void game_hooks_remove();
     void player_sync_init();
     void player_sync_shutdown();
+    void player_sync_tick(float dt);
     void npc_manager_init();
     void npc_manager_shutdown();
     void ui_init();
@@ -23,61 +22,49 @@ namespace kmp {
 }
 
 // ---------------------------------------------------------------------------
-// Plugin implementation
+// Game loop hook
 // ---------------------------------------------------------------------------
-class KenshiMPPlugin : public Ogre::Plugin {
-public:
-    const Ogre::String& getName() const override {
-        static Ogre::String name = "KenshiMP";
-        return name;
+// Original function pointer — filled by KenshiLib::AddHook
+static void (*s_original_main_loop)(GameWorld* world, float time) = nullptr;
+
+static void hooked_main_loop(GameWorld* world, float time) {
+    // Run the original game logic first
+    if (s_original_main_loop) {
+        s_original_main_loop(world, time);
     }
 
-    void install() override {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin installed");
-    }
-
-    void initialise() override {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialising...");
-
-        // Order matters: hooks first, then networking, then sync, then UI
-        kmp::game_hooks_install();
-        kmp::client_init();
-        kmp::npc_manager_init();
-        kmp::player_sync_init();
-        kmp::ui_init();
-
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialised OK");
-    }
-
-    void shutdown() override {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Shutting down...");
-
-        kmp::ui_shutdown();
-        kmp::player_sync_shutdown();
-        kmp::npc_manager_shutdown();
-        kmp::client_shutdown();
-        kmp::game_hooks_remove();
-
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Shut down OK");
-    }
-
-    void uninstall() override {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin uninstalled");
-    }
-};
-
-// ---------------------------------------------------------------------------
-// Singleton + DLL exports
-// ---------------------------------------------------------------------------
-static KenshiMPPlugin* g_plugin = nullptr;
-
-extern "C" void __declspec(dllexport) dllStartPlugin() {
-    g_plugin = new KenshiMPPlugin();
-    Ogre::Root::getSingleton().installPlugin(g_plugin);
+    // Then run our multiplayer sync
+    kmp::player_sync_tick(time);
 }
 
-extern "C" void __declspec(dllexport) dllStopPlugin() {
-    Ogre::Root::getSingleton().uninstallPlugin(g_plugin);
-    delete g_plugin;
-    g_plugin = nullptr;
+// ---------------------------------------------------------------------------
+// Plugin entry point — called by RE_Kenshi mod loader
+// ---------------------------------------------------------------------------
+extern "C" __declspec(dllexport) void startPlugin() {
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
+
+    // Hook the game's main render loop
+    // GameWorld::mainLoop_GPUSensitiveStuff is called every frame with delta time
+    auto status = KenshiLib::AddHook(
+        reinterpret_cast<void*>(
+            KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff)
+        ),
+        reinterpret_cast<void*>(&hooked_main_loop),
+        reinterpret_cast<void**>(&s_original_main_loop)
+    );
+
+    if (status != HookStatus::SUCCESS) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] FATAL: Failed to hook game loop!"
+        );
+        return;
+    }
+
+    // Init subsystems
+    kmp::client_init();
+    kmp::npc_manager_init();
+    kmp::player_sync_init();
+    kmp::ui_init();
+
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK");
 }
