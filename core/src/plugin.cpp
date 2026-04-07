@@ -57,11 +57,12 @@ static void hooked_main_loop(GameWorld* world, float time) {
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
-    // Get the game's base address and compute the function address from RVA
-    // RVA 0x7877A0 = GameWorld::mainLoop_GPUSensitiveStuff (from KenshiLib header)
-    // Can't use GetRealAddress — the _NV_ stub is empty (zero bytes)
-    uintptr_t game_base = (uintptr_t)GetModuleHandle(NULL);
-    intptr_t func_addr = (intptr_t)(game_base + 0x7877A0);
+    // Use GetRealAddress with the virtual function stub (has a proper jmp instruction)
+    // The _NV_ stub is empty (zero bytes) and doesn't work with GetRealAddress
+    // Use the template overload which handles member function pointers
+    intptr_t func_addr = KenshiLib::GetRealAddress(
+        &GameWorld::mainLoop_GPUSensitiveStuff
+    );
 
     KenshiLib::HookStatus status = KenshiLib::AddHook(
         func_addr,
