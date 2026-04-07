@@ -17,6 +17,7 @@ set(KENSHILIB_DIR "" CACHE PATH "Path to KenshiLib root (include/ and lib/)")
 set(OGRE_DIR      "" CACHE PATH "Path to Ogre3D SDK (from Kenshi or standalone)")
 set(BOOST_ROOT    "" CACHE PATH "Path to Boost 1.60+ root")
 set(ENET_DIR      "" CACHE PATH "Path to ENet root (include/ and lib/)")
+set(KENSHILIB_DEPS_DIR "" CACHE PATH "Path to KenshiLib_Examples_deps root")
 set(MYGUI_DIR     "" CACHE PATH "Path to MyGUI SDK")
 
 # ---------------------------------------------------------------------------
