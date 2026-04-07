@@ -144,7 +144,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = (ou && ou->player) ? ou->player->getFaction() : NULL;
+        Faction* faction = (ou && ou->factionMgr) ? ou->factionMgr->getEmptyFaction() : NULL;
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
@@ -233,7 +233,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = (ou && ou->player) ? ou->player->getFaction() : NULL;
+        Faction* faction = (ou && ou->factionMgr) ? ou->factionMgr->getEmptyFaction() : NULL;
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
