@@ -9,17 +9,17 @@ namespace kmp {
 // ---------------------------------------------------------------------------
 // Packet types
 // ---------------------------------------------------------------------------
-enum class PacketType : uint8_t {
-    CONNECT_REQUEST  = 0x01,   // client -> server: join with player name
-    CONNECT_ACCEPT   = 0x02,   // server -> client: assigned player ID
-    CONNECT_REJECT   = 0x03,   // server -> client: reason string
-    PLAYER_STATE     = 0x10,   // bidirectional: position, rotation, animation
-    PLAYER_DISCONNECT= 0x11,   // server -> client: remove player NPC
-    SPAWN_NPC        = 0x20,   // server -> client: create NPC for remote player
-    CHAT_MESSAGE     = 0x30,   // bidirectional
-    PING             = 0xF0,
-    PONG             = 0xF1,
-};
+namespace PacketType {
+    static const uint8_t CONNECT_REQUEST  = 0x01;
+    static const uint8_t CONNECT_ACCEPT   = 0x02;
+    static const uint8_t CONNECT_REJECT   = 0x03;
+    static const uint8_t PLAYER_STATE     = 0x10;
+    static const uint8_t PLAYER_DISCONNECT= 0x11;
+    static const uint8_t SPAWN_NPC        = 0x20;
+    static const uint8_t CHAT_MESSAGE     = 0x30;
+    static const uint8_t PING             = 0xF0;
+    static const uint8_t PONG             = 0xF1;
+}
 
 // ---------------------------------------------------------------------------
 // Packet header — prefixed to every packet
@@ -28,7 +28,7 @@ enum class PacketType : uint8_t {
 
 struct PacketHeader {
     uint8_t    version;    // PROTOCOL_VERSION
-    PacketType type;
+    uint8_t    type;       // PacketType::*
 };
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,9 @@ add_library(KenshiMP SHARED
     src/ui.cpp
 )
 
+# KenshiLib PerfTimer.h uses wide-string CreateMutex
+target_compile_definitions(KenshiMP PRIVATE UNICODE _UNICODE)
+
 # C++11 — required by v100 toolset
 set_target_properties(KenshiMP PROPERTIES
     CXX_STANDARD 11
