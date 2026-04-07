@@ -1,14 +1,14 @@
 // plugin.cpp — KenshiLib plugin entry point for KenshiMP
 //
 // RE_Kenshi mod loader calls startPlugin() when the mod is loaded.
-// We run our sync loop on a background thread since Ogre::FrameListener
-// doesn't work with Kenshi's custom game loop.
+// We hook the game's main loop via KenshiLib::AddHook to get
+// per-frame callbacks on the game thread.
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <kenshi/Globals.h>
+#include <kenshi/GameWorld.h>
+#include <core/Functions.h>
 #include <OgreLogManager.h>
 
-// Forward declarations for our subsystems
 namespace kmp {
     void client_init();
     void client_shutdown();
@@ -22,45 +22,30 @@ namespace kmp {
 }
 
 // ---------------------------------------------------------------------------
-// Background thread — runs our sync loop at ~20Hz
+// Game loop hook
 // ---------------------------------------------------------------------------
-static volatile bool s_running = false;
-static HANDLE s_thread = nullptr;
+static void (*s_original_main_loop)(GameWorld* world, float time) = NULL;
+static bool s_subsystems_initialized = false;
 
-static DWORD WINAPI sync_thread(LPVOID) {
-    // Wait a few seconds for the game to fully initialize
-    Sleep(5000);
-
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Sync thread starting...");
-
-    kmp::client_init();
-    kmp::npc_manager_init();
-    kmp::player_sync_init();
-    kmp::ui_init();
-
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready, entering loop");
-
-    LARGE_INTEGER freq, last, now;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&last);
-
-    while (s_running) {
-        QueryPerformanceCounter(&now);
-        float dt = static_cast<float>(now.QuadPart - last.QuadPart) / static_cast<float>(freq.QuadPart);
-        last = now;
-
-        kmp::player_sync_tick(dt);
-
-        // Sleep ~50ms (20Hz) but use shorter sleep for responsive hotkeys
-        Sleep(16);
+static void hooked_main_loop(GameWorld* world, float time) {
+    // Call original game logic first
+    if (s_original_main_loop) {
+        s_original_main_loop(world, time);
     }
 
-    kmp::ui_shutdown();
-    kmp::player_sync_shutdown();
-    kmp::npc_manager_shutdown();
-    kmp::client_shutdown();
+    // Defer subsystem init to first hook call (MyGUI not ready during startPlugin)
+    if (!s_subsystems_initialized) {
+        s_subsystems_initialized = true;
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Initialising subsystems...");
+        kmp::client_init();
+        kmp::npc_manager_init();
+        kmp::player_sync_init();
+        kmp::ui_init();
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Subsystems ready");
+    }
 
-    return 0;
+    // Run multiplayer sync on the game thread
+    kmp::player_sync_tick(time);
 }
 
 // ---------------------------------------------------------------------------
@@ -69,8 +54,18 @@ static DWORD WINAPI sync_thread(LPVOID) {
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
-    s_running = true;
-    s_thread = CreateThread(nullptr, 0, sync_thread, nullptr, 0, nullptr);
+    KenshiLib::HookStatus status = KenshiLib::AddHook(
+        KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff),
+        &hooked_main_loop,
+        &s_original_main_loop
+    );
 
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK (sync thread started)");
+    if (status != KenshiLib::SUCCESS) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] FATAL: Failed to hook game loop!"
+        );
+        return;
+    }
+
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loaded OK (game loop hooked)");
 }
