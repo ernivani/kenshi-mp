@@ -270,6 +270,7 @@ void ui_check_hotkey() {
                 req.name[MAX_NAME_LENGTH - 1] = '\0';
                 std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
                 req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                req.is_host = 1;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connected!");
