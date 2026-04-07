@@ -9,6 +9,7 @@ add_library(KenshiMP SHARED
     src/game_hooks.cpp
     src/player_sync.cpp
     src/npc_manager.cpp
+    src/host_sync.cpp
     src/ui.cpp
 )
 
