@@ -44,6 +44,7 @@ static std::string itos(uint32_t val) {
 struct SyncedNPC {
     uint32_t npc_id;
     float    last_x, last_y, last_z;
+    bool     is_test;  // test NPCs don't get auto-despawned
 };
 
 static std::map<uint64_t, SyncedNPC> s_synced_npcs;
@@ -92,8 +93,8 @@ void host_sync_spawn_test_npc(float x, float y, float z) {
     RootObjectFactory* factory = ou->theFactory;
     if (!factory) return;
 
-    // Use the player's faction so the NPC is friendly
-    Faction* faction = ou->player->getFaction();
+    // Use an empty/neutral faction so NPC doesn't join the player's team
+    Faction* faction = ou->factionMgr->getEmptyFaction();
 
     Ogre::Vector3 spawn_pos(x, y, z);
     RootObjectBase* obj = factory->createRandomCharacter(
@@ -114,6 +115,7 @@ void host_sync_spawn_test_npc(float x, float y, float z) {
         snpc.last_x = x;
         snpc.last_y = y;
         snpc.last_z = z;
+        snpc.is_test = true;
         s_synced_npcs[key] = snpc;
 
         NPCSpawnRemote spawn;
@@ -218,6 +220,7 @@ void host_sync_tick(float dt) {
             snpc.last_x = pos.x;
             snpc.last_y = pos.y;
             snpc.last_z = pos.z;
+            snpc.is_test = false;
             s_synced_npcs[key] = snpc;
 
             NPCSpawnRemote spawn;
@@ -236,6 +239,7 @@ void host_sync_tick(float dt) {
     std::vector<uint64_t> to_remove;
     std::map<uint64_t, SyncedNPC>::iterator synced_it;
     for (synced_it = s_synced_npcs.begin(); synced_it != s_synced_npcs.end(); ++synced_it) {
+        if (synced_it->second.is_test) continue;  // don't auto-despawn test NPCs
         if (in_range_keys.find(synced_it->first) == in_range_keys.end()) {
             NPCDespawnRemote despawn;
             despawn.npc_id = synced_it->second.npc_id;
