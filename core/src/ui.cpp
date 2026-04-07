@@ -70,6 +70,13 @@ static void update_status_text();
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 void ui_init() {
+    // Skip MyGUI widget creation for now — use hotkey-based connect instead
+    // MyGUI skin/timing issues cause crashes during early init
+    s_ui_initialized = true;
+    s_ui_visible = false;
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] UI initialized (headless mode)");
+    return;
+
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (!gui) {
         Ogre::LogManager::getSingleton().logMessage(
@@ -243,14 +250,36 @@ void ui_toggle() {
 // Check for F8 key press — call this from player_sync_tick or game hook
 // ---------------------------------------------------------------------------
 void ui_check_hotkey() {
-    // Check F8 key state via Windows API (works regardless of game input state)
+    // F8: toggle UI visibility
     static bool s_f8_was_down = false;
     bool f8_down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-
     if (f8_down && !s_f8_was_down) {
         ui_toggle();
     }
     s_f8_was_down = f8_down;
+
+    // F9: auto-connect to localhost:7777 (no GUI needed)
+    static bool s_f9_was_down = false;
+    bool f9_down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+    if (f9_down && !s_f9_was_down) {
+        if (!client_is_connected()) {
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connecting to 127.0.0.1:7777...");
+            if (client_connect("127.0.0.1", 7777)) {
+                ConnectRequest req;
+                safe_strcpy(req.name, "Player");
+                safe_strcpy(req.model, "greenlander");
+                auto buf = pack(req);
+                client_send_reliable(buf.data(), buf.size());
+                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connected!");
+            } else {
+                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connection failed!");
+            }
+        } else {
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Disconnecting...");
+            client_disconnect();
+        }
+    }
+    s_f9_was_down = f9_down;
 }
 
 // ---------------------------------------------------------------------------
