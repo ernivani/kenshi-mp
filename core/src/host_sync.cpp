@@ -16,6 +16,7 @@
 #include <kenshi/RootObjectBase.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
+#include <kenshi/Faction.h>
 #include <kenshi/RaceData.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
@@ -86,13 +87,17 @@ static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_i
 
 void host_sync_spawn_test_npc(float x, float y, float z) {
     if (!ou) return;
+    if (!ou->player) return;
 
     RootObjectFactory* factory = ou->theFactory;
     if (!factory) return;
 
+    // Use the player's faction so the NPC is friendly
+    Faction* faction = ou->player->getFaction();
+
     Ogre::Vector3 spawn_pos(x, y, z);
     RootObjectBase* obj = factory->createRandomCharacter(
-        NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+        faction, spawn_pos, NULL, NULL, NULL, 0.0f
     );
 
     Character* npc = dynamic_cast<Character*>(obj);
