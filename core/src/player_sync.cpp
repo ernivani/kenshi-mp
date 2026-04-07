@@ -35,7 +35,16 @@ extern bool game_is_world_loaded();
 extern void npc_manager_on_spawn(const SpawnNPC& pkt);
 extern void npc_manager_on_state(const PlayerState& pkt);
 extern void npc_manager_on_disconnect(uint32_t player_id);
+extern void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt);
+extern void npc_manager_on_remote_state(const NPCStateEntry& entry);
+extern void npc_manager_on_remote_despawn(uint32_t npc_id);
 extern void npc_manager_update(float dt);
+
+extern void host_sync_init();
+extern void host_sync_shutdown();
+extern void host_sync_tick(float dt);
+extern void host_sync_set_host(bool is_host);
+extern bool host_sync_is_host();
 
 extern void ui_on_chat(const ChatMessage& pkt);
 extern void ui_on_connect_accept(uint32_t player_id);
@@ -88,6 +97,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         ConnectAccept pkt;
         if (unpack(data, length, pkt)) {
             client_set_local_id(pkt.player_id);
+            host_sync_set_host(true);  // TODO: server should confirm host status
             ui_on_connect_accept(pkt.player_id);
         }
         break;
@@ -130,6 +140,43 @@ static void on_packet_received(const uint8_t* data, size_t length) {
     case PacketType::PONG:
         break;
 
+    case PacketType::NPC_SPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            NPCSpawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                npc_manager_on_remote_spawn(pkt);
+            }
+        }
+        break;
+    }
+
+    case PacketType::NPC_BATCH_STATE: {
+        if (!host_sync_is_host()) {
+            NPCBatchHeader batch_hdr;
+            if (unpack(data, length, batch_hdr)) {
+                size_t offset = sizeof(NPCBatchHeader);
+                for (uint16_t i = 0; i < batch_hdr.count; ++i) {
+                    if (offset + sizeof(NPCStateEntry) > length) break;
+                    NPCStateEntry entry;
+                    std::memcpy(&entry, data + offset, sizeof(NPCStateEntry));
+                    npc_manager_on_remote_state(entry);
+                    offset += sizeof(NPCStateEntry);
+                }
+            }
+        }
+        break;
+    }
+
+    case PacketType::NPC_DESPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            NPCDespawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                npc_manager_on_remote_despawn(pkt.npc_id);
+            }
+        }
+        break;
+    }
+
     default:
         break;
     }
@@ -142,6 +189,7 @@ void player_sync_init() {
     std::memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_send_timer = 0.0f;
     client_set_packet_callback(on_packet_received);
+    host_sync_init();
     s_initialized = true;
 }
 
@@ -191,6 +239,7 @@ void player_sync_tick(float dt) {
                 req.name[MAX_NAME_LENGTH - 1] = '\0';
                 std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
                 req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                req.is_host = 1;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 s_auto_reconnect = false;
@@ -204,6 +253,9 @@ void player_sync_tick(float dt) {
 
     // Update remote NPC positions (interpolation)
     npc_manager_update(dt);
+
+    // Host: scan and send NPC state to server
+    host_sync_tick(dt);
 
     // Send local player state at tick rate
     s_send_timer += dt;
