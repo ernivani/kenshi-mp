@@ -26,6 +26,7 @@ target_compile_definitions(KenshiMP PRIVATE
     BOOST_ALL_NO_LIB
     BOOST_ERROR_CODE_HEADER_ONLY
     BOOST_SYSTEM_NO_DEPRECATED
+    _HAS_TR1_NAMESPACE=1
 )
 
 # Common protocol headers

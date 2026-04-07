@@ -1,11 +1,11 @@
 // plugin.cpp — KenshiLib plugin entry point for KenshiMP
 //
 // RE_Kenshi mod loader calls startPlugin() when the mod is loaded.
-// We hook the game's main render loop to run our sync every frame.
+// We use Ogre::FrameListener for per-frame updates instead of
+// KenshiLib::AddHook to avoid VS2010/VS2022 ABI issues.
 
-#include <kenshi/Globals.h>
-#include <kenshi/GameWorld.h>
-#include <core/Functions.h>
+#include <OgreRoot.h>
+#include <OgreFrameListener.h>
 #include <OgreLogManager.h>
 
 // Forward declarations for our subsystems
@@ -22,20 +22,17 @@ namespace kmp {
 }
 
 // ---------------------------------------------------------------------------
-// Game loop hook
+// Ogre FrameListener — called every frame by the rendering engine
 // ---------------------------------------------------------------------------
-// Original function pointer — filled by KenshiLib::AddHook
-static void (*s_original_main_loop)(GameWorld* world, float time) = nullptr;
-
-static void hooked_main_loop(GameWorld* world, float time) {
-    // Run the original game logic first
-    if (s_original_main_loop) {
-        s_original_main_loop(world, time);
+class KenshiMPFrameListener : public Ogre::FrameListener {
+public:
+    bool frameRenderingQueued(const Ogre::FrameEvent& evt) override {
+        kmp::player_sync_tick(evt.timeSinceLastFrame);
+        return true;
     }
+};
 
-    // Then run our multiplayer sync
-    kmp::player_sync_tick(time);
-}
+static KenshiMPFrameListener* s_listener = nullptr;
 
 // ---------------------------------------------------------------------------
 // Plugin entry point — called by RE_Kenshi mod loader
@@ -43,22 +40,9 @@ static void hooked_main_loop(GameWorld* world, float time) {
 __declspec(dllexport) void startPlugin() {
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Plugin loading...");
 
-    // Hook the game's main render loop
-    // GameWorld::mainLoop_GPUSensitiveStuff is called every frame with delta time
-    auto status = KenshiLib::AddHook(
-        reinterpret_cast<void*>(
-            KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff)
-        ),
-        reinterpret_cast<void*>(&hooked_main_loop),
-        reinterpret_cast<void**>(&s_original_main_loop)
-    );
-
-    if (status != KenshiLib::HookStatus::SUCCESS) {
-        Ogre::LogManager::getSingleton().logMessage(
-            "[KenshiMP] FATAL: Failed to hook game loop!"
-        );
-        return;
-    }
+    // Register frame listener for per-frame updates
+    s_listener = new KenshiMPFrameListener();
+    Ogre::Root::getSingleton().addFrameListener(s_listener);
 
     // Init subsystems
     kmp::client_init();
