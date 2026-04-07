@@ -1,11 +1,11 @@
 // npc_manager.cpp — Manage NPCs representing remote players
 //
-// Each remote player is represented as a Kenshi NPC in the local game world.
-// Spawned via KenshiLib's RootObjectFactory, moved via Character::teleport(),
-// despawned via GameWorld::destroy().
+// Runs on the game thread. Spawns/moves/despawns NPCs via KenshiLib.
 
 #include <map>
 #include <cstring>
+#include <string>
+#include <sstream>
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -24,7 +24,6 @@
 
 namespace kmp {
 
-// External
 extern GameWorld* game_get_world();
 extern RootObjectFactory* game_get_factory();
 
@@ -32,43 +31,45 @@ extern RootObjectFactory* game_get_factory();
 // High-resolution monotonic clock
 // ---------------------------------------------------------------------------
 static double get_time_sec() {
-    static LARGE_INTEGER freq = {};
-    if (freq.QuadPart == 0) {
+    static LARGE_INTEGER freq;
+    static bool freq_init = false;
+    if (!freq_init) {
         QueryPerformanceFrequency(&freq);
+        freq_init = true;
     }
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     return static_cast<double>(now.QuadPart) / static_cast<double>(freq.QuadPart);
 }
 
+// v100-safe int to string
+static std::string itos(uint32_t val) {
+    std::ostringstream ss;
+    ss << val;
+    return ss.str();
+}
+
 // ---------------------------------------------------------------------------
-// Remote player state (for interpolation)
+// Remote player state
 // ---------------------------------------------------------------------------
+struct Snapshot {
+    float x, y, z;
+    float yaw;
+    uint32_t animation_id;
+    float speed;
+    double timestamp;
+};
+
 struct RemotePlayer {
     uint32_t player_id;
     char     name[MAX_NAME_LENGTH];
     char     model[MAX_MODEL_LENGTH];
-
-    // NPC handle — KenshiLib Character object
     Character* npc;
-
-    // Interpolation: two snapshots, blend between them
-    struct Snapshot {
-        float x, y, z;
-        float yaw;
-        uint32_t animation_id;
-        float speed;
-        double timestamp;
-    };
-
     Snapshot prev;
     Snapshot next;
     double  interp_t;
 };
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
 static std::map<uint32_t, RemotePlayer> s_remote_players;
 
 // ---------------------------------------------------------------------------
@@ -79,12 +80,18 @@ void npc_manager_init() {
 }
 
 void npc_manager_shutdown() {
-    // TODO: destroy NPCs on game thread
+    GameWorld* world = game_get_world();
+    std::map<uint32_t, RemotePlayer>::iterator it;
+    for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
+        if (it->second.npc && world) {
+            world->destroy(it->second.npc, false, "KenshiMP shutdown");
+        }
+    }
     s_remote_players.clear();
 }
 
 // ---------------------------------------------------------------------------
-// Spawn a new remote player NPC
+// Spawn
 // ---------------------------------------------------------------------------
 void npc_manager_on_spawn(const SpawnNPC& pkt) {
     if (s_remote_players.count(pkt.player_id)) return;
@@ -94,20 +101,43 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     rp.player_id = pkt.player_id;
     std::strncpy(rp.name, pkt.name, MAX_NAME_LENGTH - 1);
     std::strncpy(rp.model, pkt.model, MAX_MODEL_LENGTH - 1);
-    rp.npc = nullptr;
+    rp.npc = NULL;
 
     double now = get_time_sec();
-    rp.prev = { pkt.x, pkt.y, pkt.z, pkt.yaw, 0, 0.0f, now };
-    rp.next = rp.prev;
+    Snapshot snap;
+    snap.x = pkt.x;
+    snap.y = pkt.y;
+    snap.z = pkt.z;
+    snap.yaw = pkt.yaw;
+    snap.animation_id = 0;
+    snap.speed = 0.0f;
+    snap.timestamp = now;
+    rp.prev = snap;
+    rp.next = snap;
     rp.interp_t = 1.0;
 
-    // TODO: NPC spawning disabled — KenshiLib calls not thread-safe
-    // Need to queue spawn requests and execute on game thread
-    rp.npc = nullptr;
-    Ogre::LogManager::getSingleton().logMessage(
-        "[KenshiMP] Registered remote player " + std::to_string(pkt.player_id)
-        + " '" + std::string(pkt.name) + "' (NPC spawn deferred)"
-    );
+    // Spawn NPC via KenshiLib (safe — we're on the game thread)
+    RootObjectFactory* factory = game_get_factory();
+    if (factory) {
+        Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
+
+        RootObjectBase* obj = factory->createRandomCharacter(
+            NULL, spawn_pos, NULL, NULL, NULL, 0.0f
+        );
+
+        Character* npc = dynamic_cast<Character*>(obj);
+        if (npc) {
+            if (npc->ai) {
+                npc->ai = NULL;
+            }
+            rp.npc = npc;
+            Ogre::LogManager::getSingleton().logMessage(
+                "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
+        } else {
+            Ogre::LogManager::getSingleton().logMessage(
+                "[KenshiMP] WARNING: Failed to spawn NPC for player " + itos(pkt.player_id));
+        }
+    }
 
     s_remote_players[pkt.player_id] = rp;
 }
@@ -116,39 +146,45 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
 // Update position from network
 // ---------------------------------------------------------------------------
 void npc_manager_on_state(const PlayerState& pkt) {
-    auto it = s_remote_players.find(pkt.player_id);
+    std::map<uint32_t, RemotePlayer>::iterator it = s_remote_players.find(pkt.player_id);
     if (it == s_remote_players.end()) return;
 
     RemotePlayer& rp = it->second;
-
-    // Shift: current "next" becomes "prev", new data becomes "next"
     rp.prev = rp.next;
-    rp.next = {
-        pkt.x, pkt.y, pkt.z,
-        pkt.yaw,
-        pkt.animation_id,
-        pkt.speed,
-        get_time_sec()
-    };
+
+    Snapshot snap;
+    snap.x = pkt.x;
+    snap.y = pkt.y;
+    snap.z = pkt.z;
+    snap.yaw = pkt.yaw;
+    snap.animation_id = pkt.animation_id;
+    snap.speed = pkt.speed;
+    snap.timestamp = get_time_sec();
+    rp.next = snap;
     rp.interp_t = 0.0;
 }
 
 // ---------------------------------------------------------------------------
-// Remove a disconnected player's NPC
+// Disconnect
 // ---------------------------------------------------------------------------
 void npc_manager_on_disconnect(uint32_t player_id) {
-    auto it = s_remote_players.find(player_id);
+    std::map<uint32_t, RemotePlayer>::iterator it = s_remote_players.find(player_id);
     if (it == s_remote_players.end()) return;
 
-    Ogre::LogManager::getSingleton().logMessage(
-        "[KenshiMP] Remote player " + std::to_string(player_id) + " disconnected"
-    );
-    // TODO: destroy NPC on game thread
+    if (it->second.npc) {
+        GameWorld* world = game_get_world();
+        if (world) {
+            world->destroy(it->second.npc, false, "KenshiMP disconnect");
+        }
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Despawned NPC for player " + itos(player_id));
+    }
+
     s_remote_players.erase(it);
 }
 
 // ---------------------------------------------------------------------------
-// Per-frame update — interpolate all remote player NPCs
+// Per-frame interpolation + teleport
 // ---------------------------------------------------------------------------
 static float lerp(float a, float b, float t) {
     return a + (b - a) * t;
@@ -162,10 +198,10 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
-    for (auto& pair : s_remote_players) {
-        RemotePlayer& rp = pair.second;
+    std::map<uint32_t, RemotePlayer>::iterator it;
+    for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
+        RemotePlayer& rp = it->second;
 
-        // Advance interpolation over one tick interval
         if (rp.interp_t < 1.0) {
             rp.interp_t += static_cast<double>(dt) * TICK_RATE_HZ;
             if (rp.interp_t > 1.0) rp.interp_t = 1.0;
@@ -177,8 +213,11 @@ void npc_manager_update(float dt) {
         float iz = lerp(rp.prev.z, rp.next.z, t);
         float iyaw = lerp_angle(rp.prev.yaw, rp.next.yaw, t);
 
-        // TODO: teleport NPC on game thread
-        (void)ix; (void)iy; (void)iz; (void)iyaw;
+        if (rp.npc) {
+            Ogre::Vector3 pos(ix, iy, iz);
+            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
+            rp.npc->teleport(pos, rot);
+        }
     }
 }
 
