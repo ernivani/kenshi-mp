@@ -19,6 +19,9 @@ namespace PacketType {
     static const uint8_t CHAT_MESSAGE     = 0x30;
     static const uint8_t PING             = 0xF0;
     static const uint8_t PONG             = 0xF1;
+    static const uint8_t NPC_BATCH_STATE    = 0x40;
+    static const uint8_t NPC_SPAWN_REMOTE   = 0x41;
+    static const uint8_t NPC_DESPAWN_REMOTE = 0x42;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +42,7 @@ struct ConnectRequest {
     PacketHeader header;
     char         name[MAX_NAME_LENGTH];
     char         model[MAX_MODEL_LENGTH];
+    uint8_t      is_host;
 
     ConnectRequest() {
         std::memset(this, 0, sizeof(*this));
@@ -141,6 +145,53 @@ struct PongPacket {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::PONG;
+    }
+};
+
+struct NPCSpawnRemote {
+    PacketHeader header;
+    uint32_t     npc_id;
+    char         name[MAX_NAME_LENGTH];
+    char         race[MAX_RACE_LENGTH];
+    char         weapon[MAX_WEAPON_LENGTH];
+    char         armour[MAX_ARMOUR_LENGTH];
+    float        x, y, z;
+    float        yaw;
+
+    NPCSpawnRemote() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::NPC_SPAWN_REMOTE;
+    }
+};
+
+struct NPCDespawnRemote {
+    PacketHeader header;
+    uint32_t     npc_id;
+
+    NPCDespawnRemote() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::NPC_DESPAWN_REMOTE;
+    }
+};
+
+struct NPCStateEntry {
+    uint32_t npc_id;
+    float    x, y, z;
+    float    yaw;
+    float    speed;
+    uint32_t animation_id;
+};
+
+struct NPCBatchHeader {
+    PacketHeader header;
+    uint16_t     count;
+
+    NPCBatchHeader() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::NPC_BATCH_STATE;
     }
 };
 
