@@ -611,7 +611,8 @@ void npc_manager_update(float dt) {
     }
 
     // Host: detect damage to remote player avatars
-    if (host_sync_is_host() && client_is_connected()) {
+    // TODO: disabled — getMedical() crashes on createRandomCharacter NPCs
+    if (false && host_sync_is_host() && client_is_connected()) {
         std::map<uint32_t, RemotePlayer>::iterator dmg_it;
         for (dmg_it = s_remote_players.begin(); dmg_it != s_remote_players.end(); ++dmg_it) {
             RemotePlayer& rp = dmg_it->second;
