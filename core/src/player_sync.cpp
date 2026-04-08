@@ -95,7 +95,15 @@ static bool read_local_player_state(PlayerState& out) {
     out.x = pos.x;
     out.y = pos.y;
     out.z = pos.z;
-    out.yaw = 0.0f;
+
+    // Compute yaw from movement direction
+    Ogre::Vector3 dir = ch->getMovementDirection();
+    if (dir.x != 0.0f || dir.z != 0.0f) {
+        out.yaw = atan2(dir.x, dir.z);
+    } else {
+        out.yaw = s_last_sent_state.yaw;  // keep last known yaw
+    }
+
     out.speed = ch->getMovementSpeed();
     out.animation_id = 0;
     out.player_id = client_get_local_id();
@@ -110,11 +118,6 @@ static void on_packet_received(const uint8_t* data, size_t length) {
     PacketHeader header;
     if (!peek_header(data, length, header)) return;
     if (!validate_version(header)) return;
-
-    // Log NPC-related packets
-    if (header.type >= 0x40 && header.type <= 0x42) {
-        KMP_LOG("[KenshiMP] Received packet type=0x" + itos(header.type) + " len=" + itos(static_cast<uint32_t>(length)));
-    }
 
     switch (header.type) {
     case PacketType::CONNECT_ACCEPT: {
@@ -174,11 +177,9 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
 
     case PacketType::NPC_SPAWN_REMOTE: {
-        KMP_LOG("[KenshiMP] Got NPC_SPAWN_REMOTE, is_host=" + std::string(host_sync_is_host() ? "true" : "false"));
         if (!host_sync_is_host()) {
             NPCSpawnRemote pkt;
             if (unpack(data, length, pkt)) {
-                KMP_LOG("[KenshiMP] Spawning remote NPC " + itos(pkt.npc_id));
                 npc_manager_on_remote_spawn(pkt);
             }
         }

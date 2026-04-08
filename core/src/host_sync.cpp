@@ -324,12 +324,19 @@ void host_sync_tick(float dt) {
 
         Ogre::Vector3 pos = ch->getPosition();
 
+        // Compute yaw from movement direction
+        Ogre::Vector3 dir = ch->getMovementDirection();
+        float yaw = 0.0f;
+        if (dir.x != 0.0f || dir.z != 0.0f) {
+            yaw = atan2(dir.x, dir.z);
+        }
+
         NPCStateEntry entry;
         entry.npc_id = found->second.npc_id;
         entry.x = pos.x;
         entry.y = pos.y;
         entry.z = pos.z;
-        entry.yaw = 0.0f;
+        entry.yaw = yaw;
         entry.speed = ch->getMovementSpeed();
         entry.animation_id = 0;
 
