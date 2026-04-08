@@ -446,8 +446,8 @@ static void on_clear_clicked(MyGUI::Widget* sender) {
 static void on_give_katana(MyGUI::Widget* sender) { give_item_to_player("Katana"); }
 static void on_give_plank(MyGUI::Widget* sender) { give_item_to_player("Plank"); }
 static void on_give_crossbow(MyGUI::Widget* sender) { give_item_to_player("Toothpick"); }
-static void on_give_armour(MyGUI::Widget* sender) { give_item_to_player("armoured rags"); }
-static void on_give_medkit(MyGUI::Widget* sender) { give_item_to_player("first aid kit"); }
-static void on_give_food(MyGUI::Widget* sender) { give_item_to_player("dried meat"); }
+static void on_give_armour(MyGUI::Widget* sender) { give_item_to_player("Armoured Rags"); }
+static void on_give_medkit(MyGUI::Widget* sender) { give_item_to_player("Standard first aid kit"); }
+static void on_give_food(MyGUI::Widget* sender) { give_item_to_player("Dried Meat"); }
 
 } // namespace kmp
