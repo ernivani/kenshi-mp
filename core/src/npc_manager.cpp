@@ -139,19 +139,33 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     rp.next = snap;
     rp.interp_t = 1.0;
 
+    // Skip spawning if position is at origin (player hasn't sent position yet)
+    if (pkt.x == 0.0f && pkt.y == 0.0f && pkt.z == 0.0f) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Deferred NPC spawn for player " + itos(pkt.player_id) + " (no position yet)");
+        s_remote_players[pkt.player_id] = rp;
+        return;
+    }
+
     // Spawn NPC via KenshiLib (safe — we're on the game thread)
     RootObjectFactory* factory = game_get_factory();
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = (ou && ou->factionMgr) ? ou->factionMgr->getEmptyFaction() : NULL;
+        Faction* faction = NULL;
+        if (ou && ou->player) faction = ou->player->getFaction();
+        if (!faction && ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (!faction) {
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
+            s_remote_players[pkt.player_id] = rp;
+            return;
+        }
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            // Don't null AI — causes crash on next frame
             rp.npc = npc;
             Ogre::LogManager::getSingleton().logMessage(
                 "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
@@ -233,7 +247,13 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = (ou && ou->factionMgr) ? ou->factionMgr->getEmptyFaction() : NULL;
+        Faction* faction = NULL;
+        if (ou && ou->player) faction = ou->player->getFaction();
+        if (!faction && ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (!faction) {
+            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
+            return;
+        }
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
