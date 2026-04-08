@@ -34,20 +34,14 @@ namespace kmp {
 extern GameWorld* game_get_world();
 extern RootObjectFactory* game_get_factory();
 
-// Get or create a dedicated KenshiMP faction for synced NPCs
+// Get faction for synced NPCs
+// createRandomCharacter requires a "real" faction with character templates
+// Custom/empty factions cause it to return NULL or crash
 static Faction* get_kmp_faction() {
-    static Faction* s_kmp_faction = NULL;
-    if (!s_kmp_faction && ou && ou->factionMgr) {
-        s_kmp_faction = ou->factionMgr->getOrCreateFaction("KenshiMP_NPCs", "KenshiMP NPCs");
-        if (s_kmp_faction) {
-            KMP_LOG("[KenshiMP] Created KenshiMP faction for synced NPCs");
-        }
+    if (ou && ou->player) {
+        return ou->player->getFaction();
     }
-    // Fallback to player faction
-    if (!s_kmp_faction && ou && ou->player) {
-        s_kmp_faction = ou->player->getFaction();
-    }
-    return s_kmp_faction;
+    return NULL;
 }
 
 // ---------------------------------------------------------------------------
