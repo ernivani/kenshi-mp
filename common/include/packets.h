@@ -22,6 +22,8 @@ namespace PacketType {
     static const uint8_t NPC_BATCH_STATE    = 0x40;
     static const uint8_t NPC_SPAWN_REMOTE   = 0x41;
     static const uint8_t NPC_DESPAWN_REMOTE = 0x42;
+    static const uint8_t COMBAT_ATTACK      = 0x50;
+    static const uint8_t COMBAT_DAMAGE      = 0x51;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +184,8 @@ struct NPCStateEntry {
     float    yaw;
     float    speed;
     uint32_t animation_id;
+    uint8_t  flags;            // bit 0: isDown, bit 1: isDead
+    int16_t  health_percent;   // 0-100
 };
 
 struct NPCBatchHeader {
@@ -192,6 +196,34 @@ struct NPCBatchHeader {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::NPC_BATCH_STATE;
+    }
+};
+
+struct CombatAttack {
+    PacketHeader header;
+    uint32_t     target_npc_id;
+    float        cut_damage;
+    float        blunt_damage;
+    float        pierce_damage;
+
+    CombatAttack() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::COMBAT_ATTACK;
+    }
+};
+
+struct CombatDamage {
+    PacketHeader header;
+    uint32_t     player_id;
+    float        cut_damage;
+    float        blunt_damage;
+    float        pierce_damage;
+
+    CombatDamage() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::COMBAT_DAMAGE;
     }
 };
 
