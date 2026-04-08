@@ -90,43 +90,49 @@ static void give_item_to_player(const char* item_id) {
     RootObjectFactory* factory = ou->theFactory;
     if (!factory) return;
 
-    // Access game data map — GameDataManager is already included via GameWorld.h
+    // Search by GameData::stringID (human-readable name)
+    // The gamedataSID map is keyed by composite IDs, not human names
     GameDataManager& gdm = ou->gamedata;
+    GameData* gd = NULL;
+    std::string search(item_id);
 
-    // Search the string ID map
     ogre_unordered_map<std::string, GameData*>::type::iterator it;
-    it = gdm.gamedataSID.find(std::string(item_id));
-    if (it == gdm.gamedataSID.end()) {
-        Ogre::LogManager::getSingleton().logMessage(
-            std::string("[KenshiMP] Item not found: ") + item_id);
+    for (it = gdm.gamedataSID.begin(); it != gdm.gamedataSID.end(); ++it) {
+        if (!it->second) continue;
+        if (it->second->stringID == search) {
+            gd = it->second;
+            break;
+        }
+    }
 
-        // Log some possible matches
+    if (!gd) {
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Item not found by stringID: ") + item_id);
+
+        // Log items whose stringID contains our search
         int count = 0;
-        std::string search(item_id);
-        ogre_unordered_map<std::string, GameData*>::type::iterator dbg;
-        for (dbg = gdm.gamedataSID.begin(); dbg != gdm.gamedataSID.end() && count < 15; ++dbg) {
-            std::string key = dbg->first;
-            // Simple case-insensitive contains check
-            bool match = false;
-            for (size_t i = 0; i + search.size() <= key.size() && !match; ++i) {
+        for (it = gdm.gamedataSID.begin(); it != gdm.gamedataSID.end() && count < 15; ++it) {
+            if (!it->second) continue;
+            std::string sid = it->second->stringID;
+            // Case-insensitive contains
+            bool found = false;
+            for (size_t i = 0; i + search.size() <= sid.size() && !found; ++i) {
                 bool ok = true;
                 for (size_t j = 0; j < search.size() && ok; ++j) {
-                    char a = key[i+j]; if (a >= 'A' && a <= 'Z') a += 32;
+                    char a = sid[i+j]; if (a >= 'A' && a <= 'Z') a += 32;
                     char b = search[j]; if (b >= 'A' && b <= 'Z') b += 32;
                     if (a != b) ok = false;
                 }
-                if (ok) match = true;
+                if (ok) found = true;
             }
-            if (match) {
+            if (found) {
                 Ogre::LogManager::getSingleton().logMessage(
-                    std::string("[KenshiMP]   match: '") + key + "'");
+                    std::string("[KenshiMP]   match: '") + sid + "'");
                 count++;
             }
         }
         return;
     }
-
-    GameData* gd = it->second;
 
     // createItem with just GameData* (the simpler overload)
     Item* item = factory->createItem(gd);
