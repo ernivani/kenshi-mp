@@ -16,6 +16,7 @@
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/Faction.h>
 #include <kenshi/PlayerInterface.h>
+#include <kenshi/RaceData.h>
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
@@ -270,19 +271,28 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
         Faction* faction = NULL;
-        if (ou && ou->player) faction = ou->player->getFaction();
-        if (!faction && ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (!faction && ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
             Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
+
+        // Try to use the correct race template
+        GameData* charTemplate = NULL;
+        if (pkt.race[0] != '\0') {
+            RaceData* raceData = RaceData::getRaceData(std::string(pkt.race));
+            if (raceData) {
+                charTemplate = raceData->data;
+            }
+        }
+
         RootObjectBase* obj = factory->createRandomCharacter(
-            faction, spawn_pos, NULL, NULL, NULL, 0.0f
+            faction, spawn_pos, NULL, charTemplate, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            // Don't null AI — causes crash on next frame
             rnpc.npc = npc;
             Ogre::LogManager::getSingleton().logMessage(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
