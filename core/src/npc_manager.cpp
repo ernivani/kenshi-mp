@@ -553,19 +553,26 @@ void npc_manager_update(float dt) {
             float dz = target.z - current.z;
             float dist_sq = dx*dx + dz*dz;
 
+            CharMovement* movement = rp.npc->getMovement();
+            if (movement) movement->halt();
+
             if (dist_sq > 50.0f * 50.0f) {
                 Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
                 rp.npc->teleport(target, rot);
-            } else {
-                CharMovement* movement = rp.npc->getMovement();
-                if (movement) {
-                    movement->setDestination(target, HIGH_PRIORITY, false);
-                }
+            } else if (dist_sq > 1.0f && movement) {
+                movement->setDestination(target, HIGH_PRIORITY, false);
             }
         }
     }
 
-    // Remote NPCs use setDestination from on_remote_state, no interpolation loop needed
+    // Also halt AI on all remote NPCs every frame
+    std::map<uint32_t, RemoteNPC>::iterator npc_it;
+    for (npc_it = s_remote_npcs.begin(); npc_it != s_remote_npcs.end(); ++npc_it) {
+        if (npc_it->second.npc) {
+            CharMovement* mv = npc_it->second.npc->getMovement();
+            if (mv) mv->halt();
+        }
+    }
 }
 
 } // namespace kmp
