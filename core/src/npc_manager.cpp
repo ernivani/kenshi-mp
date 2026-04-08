@@ -20,6 +20,7 @@
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RaceData.h>
 #include <kenshi/CharMovement.h>
+#include <kenshi/MedicalSystem.h>
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
@@ -28,11 +29,17 @@
 
 #include "packets.h"
 #include "protocol.h"
+#include "serialization.h"
 
 namespace kmp {
 
 extern GameWorld* game_get_world();
 extern RootObjectFactory* game_get_factory();
+
+extern void client_send_reliable(const uint8_t* data, size_t length);
+extern bool client_is_connected();
+extern bool host_sync_is_host();
+extern Character* game_get_player_character();
 
 // Get faction for synced NPCs
 // createRandomCharacter needs a faction with character templates
@@ -134,6 +141,7 @@ struct RemotePlayer {
     Snapshot prev;
     Snapshot next;
     double  interp_t;
+    float   last_health;
 };
 
 static std::map<uint32_t, RemotePlayer> s_remote_players;
@@ -266,6 +274,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     rp.prev = snap;
     rp.next = snap;
     rp.interp_t = 1.0;
+    rp.last_health = -1.0f;
 
     // Skip spawning if position is at origin (player hasn't sent position yet)
     if (pkt.x == 0.0f && pkt.y == 0.0f && pkt.z == 0.0f) {
@@ -563,6 +572,77 @@ void npc_manager_update(float dt) {
     }
 
     // Remote NPCs use setDestination from on_remote_state, no interpolation loop needed
+
+    // Joiner: proximity-based attack detection
+    if (!host_sync_is_host() && client_is_connected()) {
+        static float s_attack_cooldown = 0.0f;
+        s_attack_cooldown -= dt;
+
+        if (s_attack_cooldown <= 0.0f) {
+            Character* player = game_get_player_character();
+            if (player && player->getMovementSpeed() > 5.0f) {
+                Ogre::Vector3 player_pos = player->getPosition();
+
+                std::map<uint32_t, RemoteNPC>::iterator atk_it;
+                for (atk_it = s_remote_npcs.begin(); atk_it != s_remote_npcs.end(); ++atk_it) {
+                    if (!atk_it->second.npc) continue;
+
+                    Ogre::Vector3 npc_pos = atk_it->second.npc->getPosition();
+                    float adx = player_pos.x - npc_pos.x;
+                    float adz = player_pos.z - npc_pos.z;
+                    float adist_sq = adx*adx + adz*adz;
+
+                    if (adist_sq < 8.0f * 8.0f) {
+                        CombatAttack atk;
+                        atk.target_npc_id = atk_it->second.npc_id;
+                        atk.cut_damage = 20.0f;
+                        atk.blunt_damage = 10.0f;
+                        atk.pierce_damage = 0.0f;
+
+                        std::vector<uint8_t> buf = pack(atk);
+                        client_send_reliable(buf.data(), buf.size());
+
+                        s_attack_cooldown = 1.0f;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Host: detect damage to remote player avatars
+    if (host_sync_is_host() && client_is_connected()) {
+        std::map<uint32_t, RemotePlayer>::iterator dmg_it;
+        for (dmg_it = s_remote_players.begin(); dmg_it != s_remote_players.end(); ++dmg_it) {
+            RemotePlayer& rp = dmg_it->second;
+            if (!rp.npc) continue;
+
+            MedicalSystem* med = rp.npc->getMedical();
+            if (!med || med->anatomy.count <= 0) continue;
+
+            MedicalSystem::HealthPartStatus* part = med->anatomy.stuff[0];
+            if (!part) continue;
+
+            float current_hp = part->_maxHealth;
+
+            if (rp.last_health >= 0.0f && current_hp < rp.last_health) {
+                float damage = rp.last_health - current_hp;
+
+                CombatDamage dmg_pkt;
+                dmg_pkt.player_id = rp.player_id;
+                dmg_pkt.cut_damage = damage * 0.5f;
+                dmg_pkt.blunt_damage = damage * 0.5f;
+                dmg_pkt.pierce_damage = 0.0f;
+
+                std::vector<uint8_t> buf = pack(dmg_pkt);
+                client_send_reliable(buf.data(), buf.size());
+
+                KMP_LOG("[KenshiMP] Combat: avatar took " + itos(static_cast<uint32_t>(damage)) + " damage");
+            }
+
+            rp.last_health = current_hp;
+        }
+    }
 }
 
 } // namespace kmp
