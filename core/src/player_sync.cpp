@@ -64,6 +64,7 @@ extern void ui_check_hotkey();
 static PlayerState s_last_sent_state;
 static float       s_send_timer = 0.0f;
 static bool        s_initialized = false;
+static bool        s_requested_host = false;  // did we connect with is_host=1?
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -104,7 +105,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         ConnectAccept pkt;
         if (unpack(data, length, pkt)) {
             client_set_local_id(pkt.player_id);
-            host_sync_set_host(true);  // TODO: server should confirm host status
+            host_sync_set_host(s_requested_host);
             ui_on_connect_accept(pkt.player_id);
         }
         break;
@@ -194,6 +195,10 @@ static void on_packet_received(const uint8_t* data, size_t length) {
 // ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
+void player_sync_set_requested_host(bool val) {
+    s_requested_host = val;
+}
+
 void player_sync_init() {
     std::memset(&s_last_sent_state, 0, sizeof(s_last_sent_state));
     s_send_timer = 0.0f;
