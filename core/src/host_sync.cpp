@@ -18,6 +18,7 @@
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/Faction.h>
 #include <kenshi/RaceData.h>
+#include <kenshi/MedicalSystem.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
 #include "kmp_log.h"
@@ -339,6 +340,26 @@ void host_sync_tick(float dt) {
         entry.yaw = yaw;
         entry.speed = ch->getMovementSpeed();
         entry.animation_id = 0;
+
+        // Health state
+        entry.flags = 0;
+        if (ch->isDown()) entry.flags |= 0x01;
+        if (ch->isDead()) entry.flags |= 0x02;
+
+        entry.health_percent = 100;
+        MedicalSystem* med = ch->getMedical();
+        if (med && med->anatomy.count > 0) {
+            MedicalSystem::HealthPartStatus* part = med->anatomy.stuff[0];
+            if (part) {
+                float maxHp = part->maxHealth();
+                if (maxHp > 0.0f) {
+                    float currentHp = part->_maxHealth;
+                    entry.health_percent = static_cast<int16_t>((currentHp / maxHp) * 100.0f);
+                    if (entry.health_percent < 0) entry.health_percent = 0;
+                    if (entry.health_percent > 100) entry.health_percent = 100;
+                }
+            }
+        }
 
         size_t offset = batch_buf.size();
         batch_buf.resize(offset + sizeof(NPCStateEntry));
