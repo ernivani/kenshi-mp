@@ -298,59 +298,6 @@ void ui_check_hotkey() {
     }
     s_f8_was_down = f8_down;
 
-    // F9: auto-connect to localhost:7777 (no GUI needed)
-    static bool s_f9_was_down = false;
-    bool f9_down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
-    if (f9_down && !s_f9_was_down) {
-        if (!client_is_connected()) {
-            KMP_LOG("[KenshiMP] F9: Connecting as HOST to 127.0.0.1:7777...");
-            player_sync_set_requested_host(true);
-            if (client_connect("127.0.0.1", 7777)) {
-                ConnectRequest req;
-                std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
-                req.name[MAX_NAME_LENGTH - 1] = '\0';
-                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
-                req.model[MAX_MODEL_LENGTH - 1] = '\0';
-                req.is_host = 1;
-                std::vector<uint8_t> buf = pack(req);
-                client_send_reliable(buf.data(), buf.size());
-                KMP_LOG("[KenshiMP] F9: Connected!");
-            } else {
-                KMP_LOG("[KenshiMP] F9: Connection failed!");
-            }
-        } else {
-            KMP_LOG("[KenshiMP] F9: Disconnecting...");
-            client_disconnect();
-        }
-    }
-    s_f9_was_down = f9_down;
-
-    // F11: connect as JOINER (not host)
-    static bool s_f11_was_down = false;
-    bool f11_down = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
-    if (f11_down && !s_f11_was_down) {
-        if (!client_is_connected()) {
-            KMP_LOG("[KenshiMP] F11: Connecting as JOINER to 127.0.0.1:7777...");
-            player_sync_set_requested_host(false);
-            if (client_connect("127.0.0.1", 7777)) {
-                ConnectRequest req;
-                std::strncpy(req.name, "Joiner", MAX_NAME_LENGTH - 1);
-                req.name[MAX_NAME_LENGTH - 1] = '\0';
-                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
-                req.model[MAX_MODEL_LENGTH - 1] = '\0';
-                req.is_host = 0;
-                std::vector<uint8_t> buf = pack(req);
-                client_send_reliable(buf.data(), buf.size());
-                KMP_LOG("[KenshiMP] F11: Connected as joiner!");
-            } else {
-                KMP_LOG("[KenshiMP] F11: Connection failed!");
-            }
-        } else {
-            KMP_LOG("[KenshiMP] F11: Disconnecting...");
-            client_disconnect();
-        }
-    }
-    s_f11_was_down = f11_down;
 }
 
 // ---------------------------------------------------------------------------
