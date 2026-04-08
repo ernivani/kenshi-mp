@@ -411,6 +411,40 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
+    // Continuously hide local NPCs on joiner (game keeps spawning new ones)
+    if (s_local_npcs_hidden && ou) {
+        const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+        ogre_unordered_set<Character*>::type::const_iterator hide_it;
+        for (hide_it = chars.begin(); hide_it != chars.end(); ++hide_it) {
+            Character* ch = *hide_it;
+            if (!ch) continue;
+            if (ch->isPlayerCharacter()) continue;
+
+            // Check if this is one of our synced remote NPCs — don't hide those
+            bool is_remote = false;
+            std::map<uint32_t, RemoteNPC>::iterator rn;
+            for (rn = s_remote_npcs.begin(); rn != s_remote_npcs.end(); ++rn) {
+                if (rn->second.npc == ch) { is_remote = true; break; }
+            }
+            // Also check player NPCs
+            if (!is_remote) {
+                std::map<uint32_t, RemotePlayer>::iterator rp;
+                for (rp = s_remote_players.begin(); rp != s_remote_players.end(); ++rp) {
+                    if (rp->second.npc == ch) { is_remote = true; break; }
+                }
+            }
+
+            if (!is_remote) {
+                Ogre::Vector3 pos = ch->getPosition();
+                if (pos.y > -90000.0f) {
+                    Ogre::Vector3 hide_pos(pos.x, -99999.0f, pos.z);
+                    Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
+                    ch->teleport(hide_pos, rot);
+                }
+            }
+        }
+    }
+
     std::map<uint32_t, RemotePlayer>::iterator it;
     for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
         RemotePlayer& rp = it->second;
@@ -439,7 +473,7 @@ void npc_manager_update(float dt) {
         RemoteNPC& rnpc = npc_it->second;
 
         if (rnpc.interp_t < 1.0) {
-            rnpc.interp_t += static_cast<double>(dt) * 10.0;
+            rnpc.interp_t += static_cast<double>(dt) * 20.0;
             if (rnpc.interp_t > 1.0) rnpc.interp_t = 1.0;
         }
 
