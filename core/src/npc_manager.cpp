@@ -3,6 +3,7 @@
 // Runs on the game thread. Spawns/moves/despawns NPCs via KenshiLib.
 
 #include <map>
+#include <vector>
 #include <cstring>
 #include <string>
 #include <sstream>
@@ -88,11 +89,67 @@ struct RemoteNPC {
 
 static std::map<uint32_t, RemoteNPC> s_remote_npcs;
 
+// Track hidden local NPCs (joiner mode)
+struct HiddenNPC {
+    Character* ch;
+    float orig_x, orig_y, orig_z;
+};
+static std::vector<HiddenNPC> s_hidden_npcs;
+static bool s_local_npcs_hidden = false;
+
 // ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 void npc_manager_init() {
     s_remote_players.clear();
+}
+
+void npc_manager_hide_local_npcs() {
+    if (s_local_npcs_hidden) return;
+    if (!ou) return;
+
+    const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+    ogre_unordered_set<Character*>::type::const_iterator it;
+    for (it = chars.begin(); it != chars.end(); ++it) {
+        Character* ch = *it;
+        if (!ch) continue;
+        if (ch->isPlayerCharacter()) continue;
+
+        Ogre::Vector3 pos = ch->getPosition();
+        HiddenNPC hidden;
+        hidden.ch = ch;
+        hidden.orig_x = pos.x;
+        hidden.orig_y = pos.y;
+        hidden.orig_z = pos.z;
+        s_hidden_npcs.push_back(hidden);
+
+        // Teleport far underground
+        Ogre::Vector3 hide_pos(pos.x, -99999.0f, pos.z);
+        Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
+        ch->teleport(hide_pos, rot);
+    }
+
+    s_local_npcs_hidden = true;
+    Ogre::LogManager::getSingleton().logMessage(
+        "[KenshiMP] Hidden " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
+}
+
+void npc_manager_show_local_npcs() {
+    if (!s_local_npcs_hidden) return;
+
+    for (size_t i = 0; i < s_hidden_npcs.size(); ++i) {
+        HiddenNPC& h = s_hidden_npcs[i];
+        if (h.ch) {
+            Ogre::Vector3 pos(h.orig_x, h.orig_y, h.orig_z);
+            Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
+            h.ch->teleport(pos, rot);
+        }
+    }
+
+    Ogre::LogManager::getSingleton().logMessage(
+        "[KenshiMP] Restored " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
+    s_hidden_npcs.clear();
+    s_local_npcs_hidden = false;
 }
 
 void npc_manager_shutdown() {

@@ -39,6 +39,8 @@ extern void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt);
 extern void npc_manager_on_remote_state(const NPCStateEntry& entry);
 extern void npc_manager_on_remote_despawn(uint32_t npc_id);
 extern void npc_manager_update(float dt);
+extern void npc_manager_hide_local_npcs();
+extern void npc_manager_show_local_npcs();
 
 extern void host_sync_init();
 extern void host_sync_shutdown();
@@ -106,6 +108,9 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         if (unpack(data, length, pkt)) {
             client_set_local_id(pkt.player_id);
             host_sync_set_host(s_requested_host);
+            if (!s_requested_host) {
+                npc_manager_hide_local_npcs();
+            }
             ui_on_connect_accept(pkt.player_id);
         }
         break;
@@ -240,6 +245,7 @@ void player_sync_tick(float dt) {
         s_was_connected = false;
         s_auto_reconnect = true;
         Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Connection lost, will auto-reconnect...");
+        npc_manager_show_local_npcs();
         ui_on_disconnect();
     }
 

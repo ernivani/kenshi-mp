@@ -36,6 +36,7 @@ extern bool client_is_connected();
 extern uint32_t client_get_local_id();
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern void player_sync_set_requested_host(bool val);
+extern bool host_sync_is_host();
 
 // ---------------------------------------------------------------------------
 // State
@@ -546,12 +547,13 @@ static void update_status_text() {
     if (!s_status_text) return;
 
     if (client_is_connected()) {
+        std::string role = host_sync_is_host() ? "HOSTING" : "JOINED";
         s_status_text->setCaption(
-            "KenshiMP — Connected as Player #" + itos(client_get_local_id())
+            "KenshiMP - " + role + " as Player #" + itos(client_get_local_id())
         );
         s_status_text->setTextColour(MyGUI::Colour(0.4f, 1.0f, 0.4f));
     } else {
-        s_status_text->setCaption("KenshiMP — Disconnected (F8 to open)");
+        s_status_text->setCaption("KenshiMP - Disconnected (F8 to open)");
         s_status_text->setTextColour(MyGUI::Colour(1.0f, 0.6f, 0.6f));
     }
 }
