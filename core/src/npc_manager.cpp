@@ -19,6 +19,7 @@
 #include <kenshi/Faction.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RaceData.h>
+#include <kenshi/CharMovement.h>
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
@@ -32,6 +33,22 @@ namespace kmp {
 
 extern GameWorld* game_get_world();
 extern RootObjectFactory* game_get_factory();
+
+// Get or create a dedicated KenshiMP faction for synced NPCs
+static Faction* get_kmp_faction() {
+    static Faction* s_kmp_faction = NULL;
+    if (!s_kmp_faction && ou && ou->factionMgr) {
+        s_kmp_faction = ou->factionMgr->getOrCreateFaction("KenshiMP_NPCs", "KenshiMP NPCs");
+        if (s_kmp_faction) {
+            KMP_LOG("[KenshiMP] Created KenshiMP faction for synced NPCs");
+        }
+    }
+    // Fallback to player faction
+    if (!s_kmp_faction && ou && ou->player) {
+        s_kmp_faction = ou->player->getFaction();
+    }
+    return s_kmp_faction;
+}
 
 // ---------------------------------------------------------------------------
 // High-resolution monotonic clock
@@ -337,9 +354,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        // Use player's faction — getEmptyFaction may cause createRandomCharacter to fail
-        Faction* faction = NULL;
-        if (ou && ou->player) faction = ou->player->getFaction();
+        Faction* faction = get_kmp_faction();
         if (!faction) {
             KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
@@ -381,11 +396,31 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
     rnpc.next = snap;
     rnpc.interp_t = 0.0;
 
-    // Immediately teleport to fight game AI overriding position
+    // Move NPC to target position
     if (rnpc.npc) {
-        Ogre::Vector3 pos(entry.x, entry.y, entry.z);
-        Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
-        rnpc.npc->teleport(pos, rot);
+        Ogre::Vector3 target(entry.x, entry.y, entry.z);
+        Ogre::Vector3 current = rnpc.npc->getPosition();
+
+        float dx = target.x - current.x;
+        float dy = target.y - current.y;
+        float dz = target.z - current.z;
+        float dist_sq = dx*dx + dy*dy + dz*dz;
+
+        if (dist_sq > 100.0f * 100.0f) {
+            // Far away — teleport immediately
+            Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+            rnpc.npc->teleport(target, rot);
+        } else {
+            // Close enough — use setDestination for natural walking animation
+            CharMovement* movement = rnpc.npc->getMovement();
+            if (movement) {
+                movement->setDestination(target, HIGH_PRIORITY, false);
+            } else {
+                // Fallback to teleport
+                Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+                rnpc.npc->teleport(target, rot);
+            }
+        }
     }
 }
 
@@ -420,8 +455,8 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
-    // Temporarily disabled — testing if this is hiding synced NPCs
-    if (false && s_local_npcs_hidden && ou) {
+    // Hide local NPCs on joiner (game keeps spawning new ones)
+    if (s_local_npcs_hidden && ou) {
         // Build a set of our synced NPC pointers for fast lookup
         std::set<Character*> our_npcs;
         std::map<uint32_t, RemoteNPC>::iterator rn;
@@ -466,34 +501,25 @@ void npc_manager_update(float dt) {
         float iyaw = lerp_angle(rp.prev.yaw, rp.next.yaw, t);
 
         if (rp.npc) {
-            Ogre::Vector3 pos(ix, iy, iz);
-            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
-            rp.npc->teleport(pos, rot);
+            Ogre::Vector3 target(ix, iy, iz);
+            Ogre::Vector3 current = rp.npc->getPosition();
+            float dx = target.x - current.x;
+            float dz = target.z - current.z;
+            float dist_sq = dx*dx + dz*dz;
+
+            if (dist_sq > 50.0f * 50.0f) {
+                Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
+                rp.npc->teleport(target, rot);
+            } else {
+                CharMovement* movement = rp.npc->getMovement();
+                if (movement) {
+                    movement->setDestination(target, HIGH_PRIORITY, false);
+                }
+            }
         }
     }
 
-    // Also interpolate remote NPCs (from host sync)
-    std::map<uint32_t, RemoteNPC>::iterator npc_it;
-    for (npc_it = s_remote_npcs.begin(); npc_it != s_remote_npcs.end(); ++npc_it) {
-        RemoteNPC& rnpc = npc_it->second;
-
-        if (rnpc.interp_t < 1.0) {
-            rnpc.interp_t += static_cast<double>(dt) * 20.0;
-            if (rnpc.interp_t > 1.0) rnpc.interp_t = 1.0;
-        }
-
-        float t = static_cast<float>(rnpc.interp_t);
-        float ix = lerp(rnpc.prev.x, rnpc.next.x, t);
-        float iy = lerp(rnpc.prev.y, rnpc.next.y, t);
-        float iz = lerp(rnpc.prev.z, rnpc.next.z, t);
-        float iyaw = lerp_angle(rnpc.prev.yaw, rnpc.next.yaw, t);
-
-        if (rnpc.npc) {
-            Ogre::Vector3 pos(ix, iy, iz);
-            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
-            rnpc.npc->teleport(pos, rot);
-        }
-    }
+    // Remote NPCs use setDestination from on_remote_state, no interpolation loop needed
 }
 
 } // namespace kmp
