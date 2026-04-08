@@ -10,6 +10,8 @@
 #include <string>
 #include <sstream>
 
+#include <kenshi/Damages.h>
+#include <kenshi/Enums.h>
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
 #include <kenshi/Character.h>
@@ -100,6 +102,39 @@ void host_sync_resend_all() {
     }
 
     KMP_LOG("[KenshiMP] Resent " + itos(count) + " synced NPCs to new joiner");
+}
+
+void host_sync_on_combat_attack(const CombatAttack& pkt) {
+    if (!s_is_host) return;
+    if (!ou) return;
+
+    // Find the real NPC by npc_id
+    Character* target = NULL;
+    const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+    std::map<uint64_t, SyncedNPC>::iterator it;
+    for (it = s_synced_npcs.begin(); it != s_synced_npcs.end(); ++it) {
+        if (it->second.npc_id == pkt.target_npc_id) {
+            target = (Character*)(uintptr_t)it->first;
+            // Verify still in update list
+            bool valid = false;
+            ogre_unordered_set<Character*>::type::const_iterator cit;
+            for (cit = chars.begin(); cit != chars.end(); ++cit) {
+                if (*cit == target) { valid = true; break; }
+            }
+            if (!valid) target = NULL;
+            break;
+        }
+    }
+
+    if (!target) {
+        KMP_LOG("[KenshiMP] Combat: target NPC " + itos(pkt.target_npc_id) + " not found");
+        return;
+    }
+
+    Damages dmg(pkt.cut_damage, pkt.blunt_damage, pkt.pierce_damage, 0.0f, 0.0f);
+    target->hitByMeleeAttack(CUT_DEFAULT, dmg, NULL, NULL, 0);
+
+    KMP_LOG("[KenshiMP] Combat: applied damage to NPC " + itos(pkt.target_npc_id));
 }
 
 void host_sync_shutdown() {

@@ -56,6 +56,7 @@ extern void host_sync_tick(float dt);
 extern void host_sync_set_host(bool is_host);
 extern void host_sync_resend_all();
 extern bool host_sync_is_host();
+extern void host_sync_on_combat_attack(const CombatAttack& pkt);
 
 extern void admin_panel_init();
 extern void admin_panel_shutdown();
@@ -213,6 +214,15 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::COMBAT_ATTACK: {
+        if (host_sync_is_host()) {
+            CombatAttack pkt;
+            if (unpack(data, length, pkt)) {
+                host_sync_on_combat_attack(pkt);
+            }
+        }
+        break;
+    }
     default:
         break;
     }
