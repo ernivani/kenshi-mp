@@ -14,6 +14,7 @@
 
 #include <MyGUI.h>
 #include <OgreLogManager.h>
+#include "kmp_log.h"
 
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
@@ -109,7 +110,7 @@ static void give_item_to_player(const char* item_id) {
     }
 
     if (!gd) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             std::string("[KenshiMP] Item not found by name: ") + item_id);
 
         // Log items whose name contains our search (case-insensitive)
@@ -128,7 +129,7 @@ static void give_item_to_player(const char* item_id) {
                 if (ok) found = true;
             }
             if (found) {
-                Ogre::LogManager::getSingleton().logMessage(
+                KMP_LOG(
                     std::string("[KenshiMP]   match: '") + n + "'");
                 count++;
             }
@@ -141,10 +142,10 @@ static void give_item_to_player(const char* item_id) {
     Item* item = factory->createItem(gd, h, NULL, NULL, -1, NULL);
     if (item) {
         ch->giveItem(item, true, false);
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             std::string("[KenshiMP] Gave item: ") + item_id);
     } else {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             std::string("[KenshiMP] Failed to create item: ") + item_id);
     }
 }
@@ -331,10 +332,10 @@ void admin_panel_init() {
     s_give_food_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_food);
 
     s_initialized = true;
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin panel initialized");
+    KMP_LOG("[KenshiMP] Admin panel initialized");
 
     } catch (...) {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin panel init failed");
+        KMP_LOG("[KenshiMP] Admin panel init failed");
         s_initialized = false;
     }
 }
@@ -439,11 +440,11 @@ static void on_spawn_clicked(MyGUI::Widget* sender) {
 
     Ogre::Vector3 pos = ch->getPosition();
     host_sync_spawn_test_npc(pos.x, pos.y, pos.z);
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin: Spawned test NPC at player position");
+    KMP_LOG("[KenshiMP] Admin: Spawned test NPC at player position");
 }
 
 static void on_clear_clicked(MyGUI::Widget* sender) {
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin: Clear remote NPCs (not yet implemented)");
+    KMP_LOG("[KenshiMP] Admin: Clear remote NPCs (not yet implemented)");
 }
 
 static void on_give_katana(MyGUI::Widget* sender) { give_item_to_player("Katana"); }
