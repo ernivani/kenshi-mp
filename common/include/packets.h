@@ -24,6 +24,8 @@ namespace PacketType {
     static const uint8_t NPC_DESPAWN_REMOTE = 0x42;
     static const uint8_t COMBAT_ATTACK      = 0x50;
     static const uint8_t COMBAT_DAMAGE      = 0x51;
+    static const uint8_t PLAYER_COMBAT_STATS = 0x55;
+    static const uint8_t COMBAT_TARGET      = 0x56;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +226,35 @@ struct CombatDamage {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::COMBAT_DAMAGE;
+    }
+};
+
+struct PlayerCombatStats {
+    PacketHeader header;
+    uint32_t     player_id;
+    float        strength;
+    float        dexterity;
+    float        toughness;
+    float        melee_attack;
+    float        melee_defence;
+    float        athletics;
+
+    PlayerCombatStats() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::PLAYER_COMBAT_STATS;
+    }
+};
+
+struct CombatTarget {
+    PacketHeader header;
+    uint32_t     player_id;
+    uint32_t     target_npc_id;
+
+    CombatTarget() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::COMBAT_TARGET;
     }
 };
 

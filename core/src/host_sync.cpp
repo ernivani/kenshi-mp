@@ -21,6 +21,7 @@
 #include <kenshi/Faction.h>
 #include <kenshi/RaceData.h>
 #include <kenshi/MedicalSystem.h>
+#include <kenshi/CharStats.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
 #include "kmp_log.h"
@@ -35,6 +36,7 @@ extern void client_send_unreliable(const uint8_t* data, size_t length);
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern Character* game_get_player_character();
 extern bool npc_manager_is_player_npc(Character* ch);
+extern Character* npc_manager_get_player_avatar(uint32_t player_id);
 
 // v100-safe int to string
 static std::string itos(uint32_t val) {
@@ -135,6 +137,71 @@ void host_sync_on_combat_attack(const CombatAttack& pkt) {
     target->hitByMeleeAttack(CUT_DEFAULT, dmg, NULL, NULL, 0);
 
     KMP_LOG("[KenshiMP] Combat: applied damage to NPC " + itos(pkt.target_npc_id));
+}
+
+void host_sync_on_combat_stats(const PlayerCombatStats& pkt) {
+    if (!s_is_host) return;
+
+    Character* avatar = npc_manager_get_player_avatar(pkt.player_id);
+    if (!avatar) {
+        KMP_LOG("[KenshiMP] Combat stats: avatar not found for player " + itos(pkt.player_id));
+        return;
+    }
+
+    CharStats* stats = avatar->getStats();
+    if (!stats) {
+        KMP_LOG("[KenshiMP] Combat stats: CharStats null for avatar");
+        return;
+    }
+
+    stats->_strength = pkt.strength;
+    stats->_dexterity = pkt.dexterity;
+    stats->_toughness = pkt.toughness;
+    stats->__meleeAttack = pkt.melee_attack;
+    stats->_meleeDefence = pkt.melee_defence;
+    stats->_athletics = pkt.athletics;
+
+    KMP_LOG("[KenshiMP] Combat stats applied: str=" + itos(static_cast<uint32_t>(pkt.strength))
+        + " dex=" + itos(static_cast<uint32_t>(pkt.dexterity))
+        + " tgh=" + itos(static_cast<uint32_t>(pkt.toughness))
+        + " atk=" + itos(static_cast<uint32_t>(pkt.melee_attack))
+        + " def=" + itos(static_cast<uint32_t>(pkt.melee_defence)));
+}
+
+void host_sync_on_combat_target(const CombatTarget& pkt) {
+    if (!s_is_host) return;
+    if (!ou) return;
+
+    Character* avatar = npc_manager_get_player_avatar(pkt.player_id);
+    if (!avatar) {
+        KMP_LOG("[KenshiMP] Combat target: avatar not found for player " + itos(pkt.player_id));
+        return;
+    }
+
+    // Find the real NPC by npc_id
+    Character* target = NULL;
+    const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+    std::map<uint64_t, SyncedNPC>::iterator it;
+    for (it = s_synced_npcs.begin(); it != s_synced_npcs.end(); ++it) {
+        if (it->second.npc_id == pkt.target_npc_id) {
+            target = (Character*)(uintptr_t)it->first;
+            bool valid = false;
+            ogre_unordered_set<Character*>::type::const_iterator cit;
+            for (cit = chars.begin(); cit != chars.end(); ++cit) {
+                if (*cit == target) { valid = true; break; }
+            }
+            if (!valid) target = NULL;
+            break;
+        }
+    }
+
+    if (!target) {
+        KMP_LOG("[KenshiMP] Combat target: NPC " + itos(pkt.target_npc_id) + " not found");
+        return;
+    }
+
+    avatar->attackTarget(target);
+    KMP_LOG("[KenshiMP] Combat: avatar attacking NPC " + itos(pkt.target_npc_id));
 }
 
 void host_sync_shutdown() {
