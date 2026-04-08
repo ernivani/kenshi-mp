@@ -394,6 +394,31 @@ void player_sync_tick(float dt) {
     // Host: scan and send NPC state to server
     host_sync_tick(dt);
 
+    // Joiner: periodically re-send combat stats (handles timing + leveling)
+    if (!host_sync_is_host()) {
+        static float s_stats_timer = 3.0f;  // send 3 seconds after connect, then every 30s
+        s_stats_timer -= dt;
+        if (s_stats_timer <= 0.0f) {
+            s_stats_timer = 30.0f;
+            Character* local_ch = game_get_player_character();
+            if (local_ch) {
+                CharStats* st = local_ch->getStats();
+                if (st) {
+                    PlayerCombatStats stats_pkt;
+                    stats_pkt.player_id = client_get_local_id();
+                    stats_pkt.strength = st->_strength;
+                    stats_pkt.dexterity = st->_dexterity;
+                    stats_pkt.toughness = st->_toughness;
+                    stats_pkt.melee_attack = st->__meleeAttack;
+                    stats_pkt.melee_defence = st->_meleeDefence;
+                    stats_pkt.athletics = st->_athletics;
+                    std::vector<uint8_t> buf = pack(stats_pkt);
+                    client_send_reliable(buf.data(), buf.size());
+                }
+            }
+        }
+    }
+
     // Send local player state at tick rate
     s_send_timer += dt;
     if (s_send_timer >= TICK_INTERVAL_SEC) {

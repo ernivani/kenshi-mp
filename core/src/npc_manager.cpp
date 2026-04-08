@@ -484,21 +484,9 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
         float dz = target.z - current.z;
         float dist_sq = dx*dx + dy*dy + dz*dz;
 
-        if (dist_sq > 100.0f * 100.0f) {
-            // Far away — teleport immediately
-            Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
-            rnpc.npc->teleport(target, rot);
-        } else {
-            // Close enough — use setDestination for natural walking animation
-            CharMovement* movement = rnpc.npc->getMovement();
-            if (movement) {
-                movement->setDestination(target, HIGH_PRIORITY, false);
-            } else {
-                // Fallback to teleport
-                Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
-                rnpc.npc->teleport(target, rot);
-            }
-        }
+        // Always teleport — setDestination gets overridden by NPC AI
+        Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+        rnpc.npc->teleport(target, rot);
     }
 }
 
