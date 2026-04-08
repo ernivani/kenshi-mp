@@ -153,11 +153,10 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
         Faction* faction = NULL;
-        if (ou && ou->player) faction = ou->player->getFaction();
-        if (!faction && ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (!faction && ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
             Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
-            s_remote_players[pkt.player_id] = rp;
             return;
         }
         RootObjectBase* obj = factory->createRandomCharacter(
@@ -186,6 +185,29 @@ void npc_manager_on_state(const PlayerState& pkt) {
     if (it == s_remote_players.end()) return;
 
     RemotePlayer& rp = it->second;
+
+    // If NPC was deferred (no position at spawn time), spawn now at real position
+    if (!rp.npc && pkt.x != 0.0f && pkt.y != 0.0f) {
+        RootObjectFactory* factory = game_get_factory();
+        if (factory) {
+            Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
+            Faction* faction = NULL;
+            if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+            if (!faction && ou && ou->player) faction = ou->player->getFaction();
+            if (faction) {
+                RootObjectBase* obj = factory->createRandomCharacter(
+                    faction, spawn_pos, NULL, NULL, NULL, 0.0f
+                );
+                Character* npc = dynamic_cast<Character*>(obj);
+                if (npc) {
+                    rp.npc = npc;
+                    Ogre::LogManager::getSingleton().logMessage(
+                        "[KenshiMP] Late-spawned NPC for player " + itos(pkt.player_id));
+                }
+            }
+        }
+    }
+
     rp.prev = rp.next;
 
     Snapshot snap;
