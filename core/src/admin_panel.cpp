@@ -20,6 +20,9 @@
 #include <kenshi/Character.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
+#include <kenshi/GameData.h>
+#include <kenshi/GameDataManager.h>
+#include <kenshi/Item.h>
 #include <OgreVector3.h>
 
 #include "packets.h"
@@ -64,6 +67,13 @@ static MyGUI::EditBox*  s_player_list = NULL;
 static MyGUI::TextBox*  s_npc_stats = NULL;
 static MyGUI::Button*   s_spawn_btn = NULL;
 static MyGUI::Button*   s_clear_btn = NULL;
+static MyGUI::Button*   s_give_katana_btn = NULL;
+static MyGUI::Button*   s_give_plank_btn = NULL;
+static MyGUI::Button*   s_give_crossbow_btn = NULL;
+static MyGUI::Button*   s_give_armour_btn = NULL;
+static MyGUI::Button*   s_give_medkit_btn = NULL;
+static MyGUI::Button*   s_give_food_btn = NULL;
+static MyGUI::TextBox*  s_items_label = NULL;
 
 // Track remote player positions (from received PLAYER_STATE packets)
 struct RemotePlayerInfo {
@@ -73,10 +83,50 @@ struct RemotePlayerInfo {
 static std::map<uint32_t, RemotePlayerInfo> s_known_players;
 
 // ---------------------------------------------------------------------------
+// Give item helper
+// ---------------------------------------------------------------------------
+static void give_item_to_player(const char* item_id) {
+    if (!ou) return;
+    Character* ch = game_get_player_character();
+    if (!ch) return;
+
+    RootObjectFactory* factory = ou->theFactory;
+    if (!factory) return;
+
+    // Look up item GameData by string ID
+    typedef boost::unordered::unordered_map<std::string, GameData*,
+        boost::hash<std::string>, std::equal_to<std::string>,
+        Ogre::STLAllocator<std::pair<std::string const, GameData*>,
+        Ogre::GeneralAllocPolicy> > GameDataMap;
+
+    GameDataMap& data_map = ou->gamedata.gamedataSID;
+    GameDataMap::iterator it = data_map.find(std::string(item_id));
+    if (it == data_map.end()) {
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Item not found: ") + item_id);
+        return;
+    }
+
+    GameData* gd = it->second;
+    Item* item = factory->createItem(gd);
+    if (item) {
+        ch->giveItem(item, true, false);
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Gave item: ") + item_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
 static void on_spawn_clicked(MyGUI::Widget* sender);
 static void on_clear_clicked(MyGUI::Widget* sender);
+static void on_give_katana(MyGUI::Widget* sender);
+static void on_give_plank(MyGUI::Widget* sender);
+static void on_give_crossbow(MyGUI::Widget* sender);
+static void on_give_armour(MyGUI::Widget* sender);
+static void on_give_medkit(MyGUI::Widget* sender);
+static void on_give_food(MyGUI::Widget* sender);
 
 // ---------------------------------------------------------------------------
 // Init / Shutdown
@@ -89,7 +139,7 @@ void admin_panel_init() {
 
     s_window = gui->createWidget<MyGUI::Window>(
         "Kenshi_GenericWindowSkin",
-        MyGUI::IntCoord(50, 50, 500, 420),
+        MyGUI::IntCoord(50, 50, 500, 550),
         MyGUI::Align::Default,
         "Overlapped",
         "KMP_AdminWindow"
@@ -99,6 +149,7 @@ void admin_panel_init() {
 
     MyGUI::Colour textCol(0.08f, 0.03f, 0.02f);
     std::string font = "Kenshi_StandardFont_Medium";
+    std::string btnFont = "Kenshi_PaintedTextFont_Medium";
 
     // --- Player list header ---
     MyGUI::TextBox* player_label = s_window->createWidget<MyGUI::TextBox>(
@@ -166,6 +217,85 @@ void admin_panel_init() {
     s_clear_btn->setFontName("Kenshi_PaintedTextFont_Medium");
     s_clear_btn->setTextAlign(MyGUI::Align::Center);
     s_clear_btn->eventMouseButtonClick += MyGUI::newDelegate(on_clear_clicked);
+
+    // --- Give Items ---
+    s_items_label = s_window->createWidget<MyGUI::TextBox>(
+        "Kenshi_TextBoxEmptySkin",
+        MyGUI::IntCoord(10, 315, 200, 22),
+        MyGUI::Align::Default,
+        "KMP_AdminItemsLabel"
+    );
+    s_items_label->setCaption("Give Items:");
+    s_items_label->setFontName(font);
+    s_items_label->setTextColour(textCol);
+
+    // Row 1: Katana, Plank, Crossbow
+    s_give_katana_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(10, 340, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GiveKatana"
+    );
+    s_give_katana_btn->setCaption("Katana");
+    s_give_katana_btn->setFontName(btnFont);
+    s_give_katana_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_katana_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_katana);
+
+    s_give_plank_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(170, 340, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GivePlank"
+    );
+    s_give_plank_btn->setCaption("Plank");
+    s_give_plank_btn->setFontName(btnFont);
+    s_give_plank_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_plank_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_plank);
+
+    s_give_crossbow_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(330, 340, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GiveCrossbow"
+    );
+    s_give_crossbow_btn->setCaption("Crossbow");
+    s_give_crossbow_btn->setFontName(btnFont);
+    s_give_crossbow_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_crossbow_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_crossbow);
+
+    // Row 2: Armour, Medkit, Food
+    s_give_armour_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(10, 375, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GiveArmour"
+    );
+    s_give_armour_btn->setCaption("Armour");
+    s_give_armour_btn->setFontName(btnFont);
+    s_give_armour_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_armour_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_armour);
+
+    s_give_medkit_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(170, 375, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GiveMedkit"
+    );
+    s_give_medkit_btn->setCaption("Medkit");
+    s_give_medkit_btn->setFontName(btnFont);
+    s_give_medkit_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_medkit_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_medkit);
+
+    s_give_food_btn = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(330, 375, 150, 30),
+        MyGUI::Align::Default,
+        "KMP_GiveFood"
+    );
+    s_give_food_btn->setCaption("Food");
+    s_give_food_btn->setFontName(btnFont);
+    s_give_food_btn->setTextAlign(MyGUI::Align::Center);
+    s_give_food_btn->eventMouseButtonClick += MyGUI::newDelegate(on_give_food);
 
     s_initialized = true;
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin panel initialized");
@@ -280,8 +410,14 @@ static void on_spawn_clicked(MyGUI::Widget* sender) {
 }
 
 static void on_clear_clicked(MyGUI::Widget* sender) {
-    // TODO: implement clear all remote NPCs
     Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Admin: Clear remote NPCs (not yet implemented)");
 }
+
+static void on_give_katana(MyGUI::Widget* sender) { give_item_to_player("Katana"); }
+static void on_give_plank(MyGUI::Widget* sender) { give_item_to_player("Plank"); }
+static void on_give_crossbow(MyGUI::Widget* sender) { give_item_to_player("Toothpick"); }
+static void on_give_armour(MyGUI::Widget* sender) { give_item_to_player("armoured rags"); }
+static void on_give_medkit(MyGUI::Widget* sender) { give_item_to_player("first aid kit"); }
+static void on_give_food(MyGUI::Widget* sender) { give_item_to_player("dried meat"); }
 
 } // namespace kmp
