@@ -20,9 +20,6 @@
 #include <kenshi/Character.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
-#include <kenshi/GameData.h>
-#include <kenshi/GameDataManager.h>
-#include <kenshi/Item.h>
 #include <OgreVector3.h>
 
 #include "packets.h"
@@ -86,34 +83,9 @@ static std::map<uint32_t, RemotePlayerInfo> s_known_players;
 // Give item helper
 // ---------------------------------------------------------------------------
 static void give_item_to_player(const char* item_id) {
-    if (!ou) return;
-    Character* ch = game_get_player_character();
-    if (!ch) return;
-
-    RootObjectFactory* factory = ou->theFactory;
-    if (!factory) return;
-
-    // Look up item GameData by string ID
-    typedef boost::unordered::unordered_map<std::string, GameData*,
-        boost::hash<std::string>, std::equal_to<std::string>,
-        Ogre::STLAllocator<std::pair<std::string const, GameData*>,
-        Ogre::GeneralAllocPolicy> > GameDataMap;
-
-    GameDataMap& data_map = ou->gamedata.gamedataSID;
-    GameDataMap::iterator it = data_map.find(std::string(item_id));
-    if (it == data_map.end()) {
-        Ogre::LogManager::getSingleton().logMessage(
-            std::string("[KenshiMP] Item not found: ") + item_id);
-        return;
-    }
-
-    GameData* gd = it->second;
-    Item* item = factory->createItem(gd);
-    if (item) {
-        ch->giveItem(item, true, false);
-        Ogre::LogManager::getSingleton().logMessage(
-            std::string("[KenshiMP] Gave item: ") + item_id);
-    }
+    Ogre::LogManager::getSingleton().logMessage(
+        std::string("[KenshiMP] Give item requested: ") + item_id +
+        " (item system not yet implemented - need to research correct KenshiLib API)");
 }
 
 // ---------------------------------------------------------------------------
