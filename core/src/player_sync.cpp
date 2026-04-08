@@ -9,6 +9,8 @@
 #include <sstream>
 
 #include <kenshi/Character.h>
+#include <kenshi/Damages.h>
+#include <kenshi/Enums.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
 #include "kmp_log.h"
@@ -223,6 +225,22 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         }
         break;
     }
+
+    case PacketType::COMBAT_DAMAGE: {
+        if (!host_sync_is_host()) {
+            CombatDamage pkt;
+            if (unpack(data, length, pkt)) {
+                Character* player = game_get_player_character();
+                if (player) {
+                    Damages dmg(pkt.cut_damage, pkt.blunt_damage, pkt.pierce_damage, 0.0f, 0.0f);
+                    player->hitByMeleeAttack(CUT_DEFAULT, dmg, NULL, NULL, 0);
+                    KMP_LOG("[KenshiMP] Combat: took damage from host NPC");
+                }
+            }
+        }
+        break;
+    }
+
     default:
         break;
     }
