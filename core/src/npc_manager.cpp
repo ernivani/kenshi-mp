@@ -452,21 +452,17 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
         float dz = target.z - current.z;
         float dist_sq = dx*dx + dy*dy + dz*dz;
 
-        // Halt any AI-driven movement first
         CharMovement* movement = rnpc.npc->getMovement();
-        if (movement) movement->halt();
 
         if (dist_sq > 100.0f * 100.0f) {
-            // Far away — teleport immediately
+            // Far — teleport
+            if (movement) movement->halt();
             Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
             rnpc.npc->teleport(target, rot);
-        } else if (dist_sq > 1.0f) {
-            // Close enough — use setDestination for natural walking animation
-            if (movement) {
-                movement->setDestination(target, HIGH_PRIORITY, false);
-            }
+        } else if (dist_sq > 1.0f && movement) {
+            // Walk naturally
+            movement->setDestination(target, HIGH_PRIORITY, false);
         }
-        // If very close (< 1 unit), don't move — already at target
     }
 }
 
@@ -554,23 +550,16 @@ void npc_manager_update(float dt) {
             float dist_sq = dx*dx + dz*dz;
 
             CharMovement* movement = rp.npc->getMovement();
-            if (movement) movement->halt();
 
             if (dist_sq > 50.0f * 50.0f) {
+                // Far — teleport
+                if (movement) movement->halt();
                 Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
                 rp.npc->teleport(target, rot);
             } else if (dist_sq > 1.0f && movement) {
+                // Walk naturally
                 movement->setDestination(target, HIGH_PRIORITY, false);
             }
-        }
-    }
-
-    // Also halt AI on all remote NPCs every frame
-    std::map<uint32_t, RemoteNPC>::iterator npc_it;
-    for (npc_it = s_remote_npcs.begin(); npc_it != s_remote_npcs.end(); ++npc_it) {
-        if (npc_it->second.npc) {
-            CharMovement* mv = npc_it->second.npc->getMovement();
-            if (mv) mv->halt();
         }
     }
 }
