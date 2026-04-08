@@ -35,12 +35,41 @@ extern GameWorld* game_get_world();
 extern RootObjectFactory* game_get_factory();
 
 // Get faction for synced NPCs
-// createRandomCharacter requires a "real" faction with character templates
-// Custom/empty factions cause it to return NULL or crash
+// createRandomCharacter needs a faction with character templates
+// Try known neutral factions first, fall back to player faction
 static Faction* get_kmp_faction() {
-    if (ou && ou->player) {
-        return ou->player->getFaction();
+    static Faction* s_cached = NULL;
+    static bool s_tried = false;
+
+    if (s_cached) return s_cached;
+    if (s_tried) {
+        // Already tried, use player faction
+        if (ou && ou->player) return ou->player->getFaction();
+        return NULL;
     }
+
+    s_tried = true;
+
+    if (ou && ou->factionMgr) {
+        // Try neutral factions that exist in vanilla Kenshi
+        const char* neutral_factions[] = {
+            "drifters", "traders guild", "wanderer", "tech hunters",
+            NULL
+        };
+
+        for (int i = 0; neutral_factions[i] != NULL; ++i) {
+            Faction* f = ou->factionMgr->getFactionByName(std::string(neutral_factions[i]));
+            if (f) {
+                s_cached = f;
+                KMP_LOG("[KenshiMP] Using neutral faction: " + std::string(neutral_factions[i]));
+                return s_cached;
+            }
+        }
+    }
+
+    // Fallback to player faction
+    KMP_LOG("[KenshiMP] No neutral faction found, using player faction");
+    if (ou && ou->player) return ou->player->getFaction();
     return NULL;
 }
 
