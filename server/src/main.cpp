@@ -76,7 +76,7 @@ static void signal_handler(int) {
 }
 
 int main(int argc, char* argv[]) {
-    spdlog::set_level(spdlog::level::info);
+    spdlog::set_level(spdlog::level::debug);
     spdlog::info("KenshiMP Dedicated Server v{}.{}.{}",
         0, 1, 0);
 

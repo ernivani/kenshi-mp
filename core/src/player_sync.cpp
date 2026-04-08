@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <sstream>
 
 #include <kenshi/Character.h>
 #include <OgreVector3.h>
@@ -17,6 +18,12 @@
 #include "serialization.h"
 
 namespace kmp {
+
+static std::string itos(uint32_t val) {
+    std::ostringstream ss;
+    ss << val;
+    return ss.str();
+}
 
 // External subsystems
 extern void client_poll();
@@ -104,6 +111,11 @@ static void on_packet_received(const uint8_t* data, size_t length) {
     if (!peek_header(data, length, header)) return;
     if (!validate_version(header)) return;
 
+    // Log NPC-related packets
+    if (header.type >= 0x40 && header.type <= 0x42) {
+        KMP_LOG("[KenshiMP] Received packet type=0x" + itos(header.type) + " len=" + itos(static_cast<uint32_t>(length)));
+    }
+
     switch (header.type) {
     case PacketType::CONNECT_ACCEPT: {
         ConnectAccept pkt;
@@ -162,9 +174,11 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
 
     case PacketType::NPC_SPAWN_REMOTE: {
+        KMP_LOG("[KenshiMP] Got NPC_SPAWN_REMOTE, is_host=" + std::string(host_sync_is_host() ? "true" : "false"));
         if (!host_sync_is_host()) {
             NPCSpawnRemote pkt;
             if (unpack(data, length, pkt)) {
+                KMP_LOG("[KenshiMP] Spawning remote NPC " + itos(pkt.npc_id));
                 npc_manager_on_remote_spawn(pkt);
             }
         }
