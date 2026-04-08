@@ -379,6 +379,13 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
     snap.timestamp = get_time_sec();
     rnpc.next = snap;
     rnpc.interp_t = 0.0;
+
+    // Immediately teleport to fight game AI overriding position
+    if (rnpc.npc) {
+        Ogre::Vector3 pos(entry.x, entry.y, entry.z);
+        Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+        rnpc.npc->teleport(pos, rot);
+    }
 }
 
 void npc_manager_on_remote_despawn(uint32_t npc_id) {
