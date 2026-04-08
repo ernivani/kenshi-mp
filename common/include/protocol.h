@@ -27,7 +27,7 @@ static const size_t   MAX_MODEL_LENGTH   = 64;
 static const size_t   MAX_CHAT_LENGTH    = 256;
 
 static const float    NPC_SYNC_RADIUS     = 500.0f;
-static const float    NPC_SYNC_INTERVAL   = 1.0f / 10;
+static const float    NPC_SYNC_INTERVAL   = 1.0f / 20;
 static const uint16_t MAX_NPC_BATCH       = 49;
 static const size_t   MAX_RACE_LENGTH     = 32;
 static const size_t   MAX_WEAPON_LENGTH   = 64;
