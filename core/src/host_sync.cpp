@@ -162,10 +162,10 @@ static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_i
         pkt.name[MAX_NAME_LENGTH - 1] = '\0';
     }
 
-    // Race — use display name
+    // Race — send stringID so joiner can look it up with getRaceData()
     RaceData* race = ch->getRace();
     if (race && race->data) {
-        std::strncpy(pkt.race, race->data->name.c_str(), MAX_RACE_LENGTH - 1);
+        std::strncpy(pkt.race, race->data->stringID.c_str(), MAX_RACE_LENGTH - 1);
         pkt.race[MAX_RACE_LENGTH - 1] = '\0';
     }
 
