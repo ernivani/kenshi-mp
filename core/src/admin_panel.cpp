@@ -20,6 +20,8 @@
 #include <kenshi/Character.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
+#include <kenshi/Faction.h>
+#include <kenshi/util/hand.h>
 #include <OgreVector3.h>
 
 #include "packets.h"
@@ -134,8 +136,9 @@ static void give_item_to_player(const char* item_id) {
         return;
     }
 
-    // createItem with just GameData* (the simpler overload)
-    Item* item = factory->createItem(gd);
+    // Use the full createItem overload
+    hand h;
+    Item* item = factory->createItem(gd, h, NULL, NULL, -1, NULL);
     if (item) {
         ch->giveItem(item, true, false);
         Ogre::LogManager::getSingleton().logMessage(
