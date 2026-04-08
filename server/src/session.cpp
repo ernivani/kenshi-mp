@@ -239,6 +239,23 @@ static void handle_npc_packet(ENetPeer* peer, const uint8_t* data, size_t length
     relay_broadcast(peer, data, length, reliable);
 }
 
+static void handle_combat_to_host(ENetPeer* peer, const uint8_t* data, size_t length) {
+    auto it = s_peer_to_id.find(peer);
+    if (it == s_peer_to_id.end()) return;
+
+    if (s_host_id == 0) return;
+
+    // Find host peer and forward
+    for (auto& pair : s_sessions) {
+        if (pair.first == s_host_id) {
+            relay_send_to(pair.second.peer, data, length, true);
+            break;
+        }
+    }
+
+    s_sessions[it->second].last_activity = std::chrono::steady_clock::now();
+}
+
 void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     PacketHeader header;
     if (!peek_header(data, length, header)) return;
@@ -264,6 +281,12 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         handle_npc_packet(peer, data, length, false);
         break;
     case PacketType::NPC_DESPAWN_REMOTE:
+        handle_npc_packet(peer, data, length, true);
+        break;
+    case PacketType::COMBAT_ATTACK:
+        handle_combat_to_host(peer, data, length);
+        break;
+    case PacketType::COMBAT_DAMAGE:
         handle_npc_packet(peer, data, length, true);
         break;
     default:
