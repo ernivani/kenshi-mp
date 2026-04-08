@@ -51,18 +51,38 @@ static Faction* get_kmp_faction() {
     s_tried = true;
 
     if (ou && ou->factionMgr) {
-        // Try neutral factions that exist in vanilla Kenshi
-        const char* neutral_factions[] = {
-            "drifters", "traders guild", "wanderer", "tech hunters",
-            NULL
+        // Try neutral factions — search by both name and stringID
+        const char* names[] = {
+            "Drifters", "drifters", "Traders Guild", "traders guild",
+            "Wanderer", "wanderer", "Tech Hunters", "tech hunters",
+            "Neutral", "neutral", "Civilian", NULL
         };
 
-        for (int i = 0; neutral_factions[i] != NULL; ++i) {
-            Faction* f = ou->factionMgr->getFactionByName(std::string(neutral_factions[i]));
+        for (int i = 0; names[i] != NULL; ++i) {
+            Faction* f = ou->factionMgr->getFactionByName(std::string(names[i]));
             if (f) {
                 s_cached = f;
-                KMP_LOG("[KenshiMP] Using neutral faction: " + std::string(neutral_factions[i]));
+                KMP_LOG("[KenshiMP] Using neutral faction (by name): " + std::string(names[i]));
                 return s_cached;
+            }
+            f = ou->factionMgr->getFactionByStringID(std::string(names[i]));
+            if (f) {
+                s_cached = f;
+                KMP_LOG("[KenshiMP] Using neutral faction (by ID): " + std::string(names[i]));
+                return s_cached;
+            }
+        }
+
+        // Dump first 10 faction names for debugging
+        const lektor<Faction*>* all = ou->factionMgr->getAllFactions();
+        if (all) {
+            int count = 0;
+            for (int i = 0; i < all->count && count < 10; ++i) {
+                Faction* f = all->stuff[i];
+                if (f && f->data) {
+                    KMP_LOG("[KenshiMP]   faction: '" + f->data->name + "'");
+                    count++;
+                }
             }
         }
     }
