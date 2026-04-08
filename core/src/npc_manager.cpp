@@ -280,12 +280,13 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = get_kmp_faction();
+        Faction* faction = NULL;
+        if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+        if (!faction && ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
             KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
-
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
@@ -318,7 +319,9 @@ void npc_manager_on_state(const PlayerState& pkt) {
         RootObjectFactory* factory = game_get_factory();
         if (factory) {
             Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
-            Faction* faction = get_kmp_faction();
+            Faction* faction = NULL;
+            if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+            if (!faction && ou && ou->player) faction = ou->player->getFaction();
             if (faction) {
                 RootObjectBase* obj = factory->createRandomCharacter(
                     faction, spawn_pos, NULL, NULL, NULL, 0.0f
@@ -400,24 +403,18 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
             return;
         }
 
-        // Spawn NPC — createRandomCharacter for now
-        // TODO: appearance matching needs more research (factory->create with GameData)
         RootObjectBase* obj = factory->createRandomCharacter(
             faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            // Halt AI movement — we control position via setDestination
-            CharMovement* mv = npc->getMovement();
-            if (mv) mv->halt();
-
             rnpc.npc = npc;
             KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
-                " '" + std::string(pkt.name) + "'");
+                " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
         } else {
-            KMP_LOG("[KenshiMP] WARNING: spawn failed for NPC " + itos(pkt.npc_id));
+            KMP_LOG("[KenshiMP] WARNING: createRandomCharacter failed for NPC " + itos(pkt.npc_id));
         }
     }
 
@@ -452,16 +449,20 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
         float dz = target.z - current.z;
         float dist_sq = dx*dx + dy*dy + dz*dz;
 
-        CharMovement* movement = rnpc.npc->getMovement();
-
         if (dist_sq > 100.0f * 100.0f) {
-            // Far — teleport
-            if (movement) movement->halt();
+            // Far away — teleport immediately
             Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
             rnpc.npc->teleport(target, rot);
-        } else if (dist_sq > 1.0f && movement) {
-            // Walk naturally
-            movement->setDestination(target, HIGH_PRIORITY, false);
+        } else {
+            // Close enough — use setDestination for natural walking animation
+            CharMovement* movement = rnpc.npc->getMovement();
+            if (movement) {
+                movement->setDestination(target, HIGH_PRIORITY, false);
+            } else {
+                // Fallback to teleport
+                Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+                rnpc.npc->teleport(target, rot);
+            }
         }
     }
 }
@@ -549,19 +550,19 @@ void npc_manager_update(float dt) {
             float dz = target.z - current.z;
             float dist_sq = dx*dx + dz*dz;
 
-            CharMovement* movement = rp.npc->getMovement();
-
             if (dist_sq > 50.0f * 50.0f) {
-                // Far — teleport
-                if (movement) movement->halt();
                 Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
                 rp.npc->teleport(target, rot);
-            } else if (dist_sq > 1.0f && movement) {
-                // Walk naturally
-                movement->setDestination(target, HIGH_PRIORITY, false);
+            } else {
+                CharMovement* movement = rp.npc->getMovement();
+                if (movement) {
+                    movement->setDestination(target, HIGH_PRIORITY, false);
+                }
             }
         }
     }
+
+    // Remote NPCs use setDestination from on_remote_state, no interpolation loop needed
 }
 
 } // namespace kmp
