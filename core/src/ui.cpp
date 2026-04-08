@@ -404,6 +404,65 @@ void ui_send_chat(const char* message) {
 // ---------------------------------------------------------------------------
 // Widget callbacks
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Embedded server — launch server exe as child process
+// ---------------------------------------------------------------------------
+static PROCESS_INFORMATION s_server_process;
+static bool s_server_running = false;
+
+static void launch_server(uint16_t port) {
+    if (s_server_running) return;
+
+    // Find server exe relative to the DLL location
+    // Try common paths
+    const char* paths[] = {
+        "mods\\KenshiMP\\kenshi-mp-server.exe",
+        "kenshi-mp-server.exe",
+    };
+
+    std::string exe_path;
+    for (int i = 0; i < 2; ++i) {
+        DWORD attr = GetFileAttributesA(paths[i]);
+        if (attr != INVALID_FILE_ATTRIBUTES) {
+            exe_path = paths[i];
+            break;
+        }
+    }
+
+    if (exe_path.empty()) {
+        Ogre::LogManager::getSingleton().logMessage(
+            "[KenshiMP] Server exe not found! Place kenshi-mp-server.exe in mods/KenshiMP/");
+        return;
+    }
+
+    STARTUPINFOA si;
+    std::memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    std::memset(&s_server_process, 0, sizeof(s_server_process));
+
+    char cmd[512];
+    _snprintf(cmd, sizeof(cmd) - 1, "\"%s\"", exe_path.c_str());
+
+    if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
+                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &s_server_process)) {
+        s_server_running = true;
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Server launched (PID: " +
+            itos(s_server_process.dwProcessId) + ")");
+    } else {
+        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Failed to launch server");
+    }
+}
+
+static void stop_server() {
+    if (!s_server_running) return;
+
+    TerminateProcess(s_server_process.hProcess, 0);
+    CloseHandle(s_server_process.hProcess);
+    CloseHandle(s_server_process.hThread);
+    s_server_running = false;
+    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Server stopped");
+}
+
 static void do_connect(bool as_host) {
     if (client_is_connected()) return;
     if (!s_host_input || !s_port_input) return;
@@ -411,6 +470,12 @@ static void do_connect(bool as_host) {
     std::string host = s_host_input->getCaption();
     std::string port_str = s_port_input->getCaption();
     uint16_t port = static_cast<uint16_t>(atoi(port_str.c_str()));
+
+    // If hosting, launch the server first
+    if (as_host) {
+        launch_server(port);
+        Sleep(500);  // give server time to start
+    }
 
     player_sync_set_requested_host(as_host);
 
@@ -437,8 +502,9 @@ static void on_join_clicked(MyGUI::Widget* sender) {
 }
 
 static void on_disconnect_clicked(MyGUI::Widget* sender) {
-    if (!client_is_connected()) return;
+    if (!client_is_connected() && !s_server_running) return;
     client_disconnect();
+    stop_server();
     update_status_text();
 
     if (s_chat_window) s_chat_window->setVisible(false);
