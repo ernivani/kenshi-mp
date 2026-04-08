@@ -83,9 +83,61 @@ static std::map<uint32_t, RemotePlayerInfo> s_known_players;
 // Give item helper
 // ---------------------------------------------------------------------------
 static void give_item_to_player(const char* item_id) {
-    Ogre::LogManager::getSingleton().logMessage(
-        std::string("[KenshiMP] Give item requested: ") + item_id +
-        " (item system not yet implemented - need to research correct KenshiLib API)");
+    if (!ou) return;
+    Character* ch = game_get_player_character();
+    if (!ch) return;
+
+    RootObjectFactory* factory = ou->theFactory;
+    if (!factory) return;
+
+    // Access game data map — GameDataManager is already included via GameWorld.h
+    GameDataManager& gdm = ou->gamedata;
+
+    // Search the string ID map
+    ogre_unordered_map<std::string, GameData*>::type::iterator it;
+    it = gdm.gamedataSID.find(std::string(item_id));
+    if (it == gdm.gamedataSID.end()) {
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Item not found: ") + item_id);
+
+        // Log some possible matches
+        int count = 0;
+        std::string search(item_id);
+        ogre_unordered_map<std::string, GameData*>::type::iterator dbg;
+        for (dbg = gdm.gamedataSID.begin(); dbg != gdm.gamedataSID.end() && count < 15; ++dbg) {
+            std::string key = dbg->first;
+            // Simple case-insensitive contains check
+            bool match = false;
+            for (size_t i = 0; i + search.size() <= key.size() && !match; ++i) {
+                bool ok = true;
+                for (size_t j = 0; j < search.size() && ok; ++j) {
+                    char a = key[i+j]; if (a >= 'A' && a <= 'Z') a += 32;
+                    char b = search[j]; if (b >= 'A' && b <= 'Z') b += 32;
+                    if (a != b) ok = false;
+                }
+                if (ok) match = true;
+            }
+            if (match) {
+                Ogre::LogManager::getSingleton().logMessage(
+                    std::string("[KenshiMP]   match: '") + key + "'");
+                count++;
+            }
+        }
+        return;
+    }
+
+    GameData* gd = it->second;
+
+    // createItem with just GameData* (the simpler overload)
+    Item* item = factory->createItem(gd);
+    if (item) {
+        ch->giveItem(item, true, false);
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Gave item: ") + item_id);
+    } else {
+        Ogre::LogManager::getSingleton().logMessage(
+            std::string("[KenshiMP] Failed to create item: ") + item_id);
+    }
 }
 
 // ---------------------------------------------------------------------------
