@@ -226,12 +226,14 @@ static void handle_npc_packet(ENetPeer* peer, const uint8_t* data, size_t length
 
     // Only accept NPC packets from the host
     if (id != s_host_id) {
-        spdlog::warn("Non-host player {} tried to send NPC packet, ignoring", id);
+        // spdlog::warn("Non-host player {} tried to send NPC packet, ignoring", id);
         return;
     }
 
     // Update activity timestamp
     s_sessions[id].last_activity = std::chrono::steady_clock::now();
+
+    spdlog::debug("NPC packet from host (player {}), relaying {} bytes, reliable={}", id, length, reliable);
 
     // Relay to all non-host players
     relay_broadcast(peer, data, length, reliable);

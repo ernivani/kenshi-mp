@@ -178,7 +178,7 @@ static void handle_npc_packet(ENetPeer* peer, const uint8_t* data, size_t length
 
     // Only accept NPC packets from the host
     if (id != s_host_id) {
-        spdlog::warn("Non-host player {} tried to send NPC packet, ignoring", id);
+        // spdlog::warn("Non-host player {} tried to send NPC packet, ignoring", id);
         return;
     }
 
