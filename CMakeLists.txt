@@ -45,3 +45,8 @@ endif()
 if(KENSHIMP_BUILD_INJECTOR)
     add_subdirectory(injector)
 endif()
+
+# ---------------------------------------------------------------------------
+# Test tools
+# ---------------------------------------------------------------------------
+add_subdirectory(tools)
