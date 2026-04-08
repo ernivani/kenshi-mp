@@ -96,10 +96,11 @@ static void give_item_to_player(const char* item_id) {
     GameData* gd = NULL;
     std::string search(item_id);
 
+    // Search by GameData::name (display name at offset 0x28)
     ogre_unordered_map<std::string, GameData*>::type::iterator it;
     for (it = gdm.gamedataSID.begin(); it != gdm.gamedataSID.end(); ++it) {
         if (!it->second) continue;
-        if (it->second->stringID == search) {
+        if (it->second->name == search) {
             gd = it->second;
             break;
         }
@@ -107,19 +108,18 @@ static void give_item_to_player(const char* item_id) {
 
     if (!gd) {
         Ogre::LogManager::getSingleton().logMessage(
-            std::string("[KenshiMP] Item not found by stringID: ") + item_id);
+            std::string("[KenshiMP] Item not found by name: ") + item_id);
 
-        // Log items whose stringID contains our search
+        // Log items whose name contains our search (case-insensitive)
         int count = 0;
         for (it = gdm.gamedataSID.begin(); it != gdm.gamedataSID.end() && count < 15; ++it) {
             if (!it->second) continue;
-            std::string sid = it->second->stringID;
-            // Case-insensitive contains
+            std::string n = it->second->name;
             bool found = false;
-            for (size_t i = 0; i + search.size() <= sid.size() && !found; ++i) {
+            for (size_t i = 0; i + search.size() <= n.size() && !found; ++i) {
                 bool ok = true;
                 for (size_t j = 0; j < search.size() && ok; ++j) {
-                    char a = sid[i+j]; if (a >= 'A' && a <= 'Z') a += 32;
+                    char a = n[i+j]; if (a >= 'A' && a <= 'Z') a += 32;
                     char b = search[j]; if (b >= 'A' && b <= 'Z') b += 32;
                     if (a != b) ok = false;
                 }
@@ -127,7 +127,7 @@ static void give_item_to_player(const char* item_id) {
             }
             if (found) {
                 Ogre::LogManager::getSingleton().logMessage(
-                    std::string("[KenshiMP]   match: '") + sid + "'");
+                    std::string("[KenshiMP]   match: '") + n + "'");
                 count++;
             }
         }
