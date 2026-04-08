@@ -31,6 +31,7 @@ namespace kmp {
 extern void client_send_unreliable(const uint8_t* data, size_t length);
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern Character* game_get_player_character();
+extern bool npc_manager_is_player_npc(Character* ch);
 
 // v100-safe int to string
 static std::string itos(uint32_t val) {
@@ -247,6 +248,7 @@ void host_sync_tick(float dt) {
         Character* ch = *it;
         if (!ch) continue;
         if (ch->isPlayerCharacter()) continue;
+        if (npc_manager_is_player_npc(ch)) continue;  // skip remote player avatars
 
         Ogre::Vector3 pos = ch->getPosition();
         if (is_in_range_of_any_player(pos)) {

@@ -102,6 +102,14 @@ static bool s_local_npcs_hidden = false;
 // ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
+bool npc_manager_is_player_npc(Character* ch) {
+    std::map<uint32_t, RemotePlayer>::iterator it;
+    for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
+        if (it->second.npc == ch) return true;
+    }
+    return false;
+}
+
 void npc_manager_init() {
     s_remote_players.clear();
 }
@@ -329,25 +337,16 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
+        // Use player's faction — getEmptyFaction may cause createRandomCharacter to fail
         Faction* faction = NULL;
-        if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
-        if (!faction && ou && ou->player) faction = ou->player->getFaction();
+        if (ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
             KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
 
-        // Try to use the correct race template
-        GameData* charTemplate = NULL;
-        if (pkt.race[0] != '\0') {
-            RaceData* raceData = RaceData::getRaceData(std::string(pkt.race));
-            if (raceData) {
-                charTemplate = raceData->data;
-            }
-        }
-
         RootObjectBase* obj = factory->createRandomCharacter(
-            faction, spawn_pos, NULL, charTemplate, NULL, 0.0f
+            faction, spawn_pos, NULL, NULL, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
@@ -356,6 +355,8 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
             KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
                 " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
+        } else {
+            KMP_LOG("[KenshiMP] WARNING: createRandomCharacter failed for NPC " + itos(pkt.npc_id));
         }
     }
 
@@ -419,8 +420,8 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
-    // Continuously hide local NPCs on joiner (game keeps spawning new ones)
-    if (s_local_npcs_hidden && ou) {
+    // Temporarily disabled — testing if this is hiding synced NPCs
+    if (false && s_local_npcs_hidden && ou) {
         // Build a set of our synced NPC pointers for fast lookup
         std::set<Character*> our_npcs;
         std::map<uint32_t, RemoteNPC>::iterator rn;
