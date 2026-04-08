@@ -60,10 +60,44 @@ static uint64_t make_npc_key(Character* ch) {
 // ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
+static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_id);
+
 void host_sync_init() {
     s_synced_npcs.clear();
     s_next_npc_id = 1;
     s_npc_send_timer = 0.0f;
+}
+
+// Resend all synced NPCs — called when a new joiner connects
+void host_sync_resend_all() {
+    if (!s_is_host) return;
+    if (!ou) return;
+
+    int count = 0;
+    const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+
+    std::map<uint64_t, SyncedNPC>::iterator it;
+    for (it = s_synced_npcs.begin(); it != s_synced_npcs.end(); ++it) {
+        // Find the Character* from the key
+        Character* ch = (Character*)(uintptr_t)it->first;
+
+        // Verify it's still valid by checking if it's in the update list
+        bool valid = false;
+        ogre_unordered_set<Character*>::type::const_iterator cit;
+        for (cit = chars.begin(); cit != chars.end(); ++cit) {
+            if (*cit == ch) { valid = true; break; }
+        }
+
+        if (valid && ch) {
+            NPCSpawnRemote spawn;
+            fill_spawn_packet(spawn, ch, it->second.npc_id);
+            std::vector<uint8_t> buf = pack(spawn);
+            client_send_reliable(buf.data(), buf.size());
+            count++;
+        }
+    }
+
+    KMP_LOG("[KenshiMP] Resent " + itos(count) + " synced NPCs to new joiner");
 }
 
 void host_sync_shutdown() {
@@ -84,8 +118,6 @@ bool host_sync_is_host() {
 uint32_t host_sync_get_synced_count() {
     return static_cast<uint32_t>(s_synced_npcs.size());
 }
-
-static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_id);
 
 void host_sync_spawn_test_npc(float x, float y, float z) {
     if (!ou) return;
@@ -189,8 +221,23 @@ void host_sync_tick(float dt) {
     if (!s_is_host) return;
     if (!ou) return;
 
+    // Log once to confirm host sync is running
+    static bool s_logged_first = false;
+    if (!s_logged_first) {
+        s_logged_first = true;
+        KMP_LOG("[KenshiMP] host_sync_tick: first call");
+    }
+
     // Get all active characters
     const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+
+    // Log character count periodically
+    static int s_tick_count = 0;
+    s_tick_count++;
+    if (s_tick_count <= 3 || s_tick_count % 1000 == 0) {
+        KMP_LOG("[KenshiMP] host_sync: chars=" + itos(static_cast<uint32_t>(chars.size())) +
+            " synced=" + itos(static_cast<uint32_t>(s_synced_npcs.size())));
+    }
 
     // Build list of NPCs currently in range
     std::vector<Character*> in_range;
