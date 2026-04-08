@@ -280,16 +280,31 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
     if (factory) {
         Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
 
-        Faction* faction = NULL;
-        if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
-        if (!faction && ou && ou->player) faction = ou->player->getFaction();
+        Faction* faction = get_kmp_faction();
         if (!faction) {
             KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
-        RootObjectBase* obj = factory->createRandomCharacter(
-            faction, spawn_pos, NULL, NULL, NULL, 0.0f
-        );
+
+        RootObjectBase* obj = NULL;
+
+        // Try to spawn with exact character template from model field
+        if (pkt.model[0] != '\0') {
+            ogre_unordered_map<std::string, GameData*>::type& data_map = ou->gamedata.gamedataSID;
+            ogre_unordered_map<std::string, GameData*>::type::iterator gd_it;
+            gd_it = data_map.find(std::string(pkt.model));
+            if (gd_it != data_map.end() && gd_it->second) {
+                Ogre::Quaternion rot(Ogre::Radian(pkt.yaw), Ogre::Vector3::UNIT_Y);
+                obj = factory->create(gd_it->second, spawn_pos, false, faction, rot, NULL, NULL, NULL, false, NULL, 0.0f);
+            }
+        }
+
+        // Fallback
+        if (!obj) {
+            obj = factory->createRandomCharacter(
+                faction, spawn_pos, NULL, NULL, NULL, 0.0f
+            );
+        }
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
@@ -319,13 +334,25 @@ void npc_manager_on_state(const PlayerState& pkt) {
         RootObjectFactory* factory = game_get_factory();
         if (factory) {
             Ogre::Vector3 spawn_pos(pkt.x, pkt.y, pkt.z);
-            Faction* faction = NULL;
-            if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
-            if (!faction && ou && ou->player) faction = ou->player->getFaction();
+            Faction* faction = get_kmp_faction();
             if (faction) {
-                RootObjectBase* obj = factory->createRandomCharacter(
-                    faction, spawn_pos, NULL, NULL, NULL, 0.0f
-                );
+                RootObjectBase* obj = NULL;
+
+                // Try exact template from model field
+                if (rp.model[0] != '\0') {
+                    ogre_unordered_map<std::string, GameData*>::type& data_map = ou->gamedata.gamedataSID;
+                    ogre_unordered_map<std::string, GameData*>::type::iterator gd_it;
+                    gd_it = data_map.find(std::string(rp.model));
+                    if (gd_it != data_map.end() && gd_it->second) {
+                        Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
+                        obj = factory->create(gd_it->second, spawn_pos, false, faction, rot, NULL, NULL, NULL, false, NULL, 0.0f);
+                    }
+                }
+                if (!obj) {
+                    obj = factory->createRandomCharacter(
+                        faction, spawn_pos, NULL, NULL, NULL, 0.0f
+                    );
+                }
                 Character* npc = dynamic_cast<Character*>(obj);
                 if (npc) {
                     rp.npc = npc;
@@ -403,18 +430,35 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
             return;
         }
 
-        RootObjectBase* obj = factory->createRandomCharacter(
-            faction, spawn_pos, NULL, NULL, NULL, 0.0f
-        );
+        RootObjectBase* obj = NULL;
+
+        // Try to spawn with exact character template from host
+        if (pkt.weapon[0] != '\0') {
+            // weapon field carries the character GameData stringID
+            ogre_unordered_map<std::string, GameData*>::type& data_map = ou->gamedata.gamedataSID;
+            ogre_unordered_map<std::string, GameData*>::type::iterator gd_it;
+            gd_it = data_map.find(std::string(pkt.weapon));
+            if (gd_it != data_map.end() && gd_it->second) {
+                Ogre::Quaternion rot(Ogre::Radian(pkt.yaw), Ogre::Vector3::UNIT_Y);
+                obj = factory->create(gd_it->second, spawn_pos, false, faction, rot, NULL, NULL, NULL, false, NULL, 0.0f);
+            }
+        }
+
+        // Fallback to random character
+        if (!obj) {
+            obj = factory->createRandomCharacter(
+                faction, spawn_pos, NULL, NULL, NULL, 0.0f
+            );
+        }
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
             rnpc.npc = npc;
             KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
-                " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
+                " '" + std::string(pkt.name) + "'");
         } else {
-            KMP_LOG("[KenshiMP] WARNING: createRandomCharacter failed for NPC " + itos(pkt.npc_id));
+            KMP_LOG("[KenshiMP] WARNING: spawn failed for NPC " + itos(pkt.npc_id));
         }
     }
 

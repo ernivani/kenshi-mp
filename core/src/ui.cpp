@@ -16,6 +16,7 @@
 
 #include <MyGUI.h>
 #include <OgreLogManager.h>
+#include <kenshi/Character.h>
 #include "kmp_log.h"
 
 #include "packets.h"
@@ -38,6 +39,7 @@ extern uint32_t client_get_local_id();
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern void player_sync_set_requested_host(bool val);
 extern bool host_sync_is_host();
+extern Character* game_get_player_character();
 
 // ---------------------------------------------------------------------------
 // State
@@ -432,7 +434,14 @@ static void do_connect(bool as_host) {
         ConnectRequest req;
         std::strncpy(req.name, as_host ? "Host" : "Joiner", MAX_NAME_LENGTH - 1);
         req.name[MAX_NAME_LENGTH - 1] = '\0';
-        std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+
+        // Send the player character's GameData stringID so others can spawn a matching model
+        Character* local_ch = game_get_player_character();
+        if (local_ch && local_ch->data) {
+            std::strncpy(req.model, local_ch->data->stringID.c_str(), MAX_MODEL_LENGTH - 1);
+        } else {
+            std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+        }
         req.model[MAX_MODEL_LENGTH - 1] = '\0';
         req.is_host = as_host ? 1 : 0;
         std::vector<uint8_t> buf = pack(req);
