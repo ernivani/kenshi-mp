@@ -156,16 +156,16 @@ static bool is_in_range_of_any_player(const Ogre::Vector3& npc_pos) {
 static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_id) {
     pkt.npc_id = npc_id;
 
-    // Name from game data
+    // Name — use display name (GameData::name at offset 0x28)
     if (ch->data) {
-        std::strncpy(pkt.name, ch->data->stringID.c_str(), MAX_NAME_LENGTH - 1);
+        std::strncpy(pkt.name, ch->data->name.c_str(), MAX_NAME_LENGTH - 1);
         pkt.name[MAX_NAME_LENGTH - 1] = '\0';
     }
 
-    // Race
+    // Race — use display name
     RaceData* race = ch->getRace();
     if (race && race->data) {
-        std::strncpy(pkt.race, race->data->stringID.c_str(), MAX_RACE_LENGTH - 1);
+        std::strncpy(pkt.race, race->data->name.c_str(), MAX_RACE_LENGTH - 1);
         pkt.race[MAX_RACE_LENGTH - 1] = '\0';
     }
 
