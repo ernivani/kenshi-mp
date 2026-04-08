@@ -47,7 +47,8 @@ static bool s_ui_visible = false;
 static MyGUI::Window*   s_connect_window = NULL;
 static MyGUI::EditBox*  s_host_input     = NULL;
 static MyGUI::EditBox*  s_port_input     = NULL;
-static MyGUI::Button*   s_connect_btn    = NULL;
+static MyGUI::Button*   s_host_btn       = NULL;
+static MyGUI::Button*   s_join_btn       = NULL;
 static MyGUI::Button*   s_disconnect_btn = NULL;
 
 static MyGUI::Window*   s_chat_window    = NULL;
@@ -67,7 +68,8 @@ static std::vector<ChatEntry> s_chat_log;
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
-static void on_connect_clicked(MyGUI::Widget* sender);
+static void on_host_clicked(MyGUI::Widget* sender);
+static void on_join_clicked(MyGUI::Widget* sender);
 static void on_disconnect_clicked(MyGUI::Widget* sender);
 static void on_chat_send_clicked(MyGUI::Widget* sender);
 static void on_chat_key_press(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::Char ch);
@@ -95,7 +97,7 @@ void ui_init() {
     // --- Connect dialog ---
     s_connect_window = gui->createWidget<MyGUI::Window>(
         "Kenshi_GenericWindowSkin",
-        MyGUI::IntCoord(100, 100, 320, 200),
+        MyGUI::IntCoord(100, 100, 320, 240),
         MyGUI::Align::Default,
         "Overlapped",
         "KMP_ConnectWindow"
@@ -145,22 +147,34 @@ void ui_init() {
     s_port_input->setFontName(stdFont);
     s_port_input->setTextColour(textCol);
 
-    // Connect button
-    s_connect_btn = s_connect_window->createWidget<MyGUI::Button>(
+    // Host button
+    s_host_btn = s_connect_window->createWidget<MyGUI::Button>(
         "Kenshi_Button1Skin",
         MyGUI::IntCoord(10, 80, 140, 30),
         MyGUI::Align::Default,
-        "KMP_ConnectBtn"
+        "KMP_HostBtn"
     );
-    s_connect_btn->setCaption("Connect");
-    s_connect_btn->setFontName(btnFont);
-    s_connect_btn->setTextAlign(MyGUI::Align::Center);
-    s_connect_btn->eventMouseButtonClick += MyGUI::newDelegate(on_connect_clicked);
+    s_host_btn->setCaption("Host");
+    s_host_btn->setFontName(btnFont);
+    s_host_btn->setTextAlign(MyGUI::Align::Center);
+    s_host_btn->eventMouseButtonClick += MyGUI::newDelegate(on_host_clicked);
+
+    // Join button
+    s_join_btn = s_connect_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(160, 80, 140, 30),
+        MyGUI::Align::Default,
+        "KMP_JoinBtn"
+    );
+    s_join_btn->setCaption("Join");
+    s_join_btn->setFontName(btnFont);
+    s_join_btn->setTextAlign(MyGUI::Align::Center);
+    s_join_btn->eventMouseButtonClick += MyGUI::newDelegate(on_join_clicked);
 
     // Disconnect button
     s_disconnect_btn = s_connect_window->createWidget<MyGUI::Button>(
         "Kenshi_Button1Skin",
-        MyGUI::IntCoord(160, 80, 140, 30),
+        MyGUI::IntCoord(10, 120, 290, 30),
         MyGUI::Align::Default,
         "KMP_DisconnectBtn"
     );
@@ -390,26 +404,36 @@ void ui_send_chat(const char* message) {
 // ---------------------------------------------------------------------------
 // Widget callbacks
 // ---------------------------------------------------------------------------
-static void on_connect_clicked(MyGUI::Widget* sender) {
+static void do_connect(bool as_host) {
     if (client_is_connected()) return;
     if (!s_host_input || !s_port_input) return;
 
     std::string host = s_host_input->getCaption();
     std::string port_str = s_port_input->getCaption();
-    uint16_t port = static_cast<uint16_t>(std::stoi(port_str));
+    uint16_t port = static_cast<uint16_t>(atoi(port_str.c_str()));
 
-    // Send connect request after ENet connection
+    player_sync_set_requested_host(as_host);
+
     if (client_connect(host.c_str(), port)) {
         ConnectRequest req;
-        std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
+        std::strncpy(req.name, as_host ? "Host" : "Joiner", MAX_NAME_LENGTH - 1);
         req.name[MAX_NAME_LENGTH - 1] = '\0';
         std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
         req.model[MAX_MODEL_LENGTH - 1] = '\0';
+        req.is_host = as_host ? 1 : 0;
         std::vector<uint8_t> buf = pack(req);
         client_send_reliable(buf.data(), buf.size());
 
         update_status_text();
     }
+}
+
+static void on_host_clicked(MyGUI::Widget* sender) {
+    do_connect(true);
+}
+
+static void on_join_clicked(MyGUI::Widget* sender) {
+    do_connect(false);
 }
 
 static void on_disconnect_clicked(MyGUI::Widget* sender) {
