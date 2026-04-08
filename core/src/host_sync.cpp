@@ -210,8 +210,13 @@ static void fill_spawn_packet(NPCSpawnRemote& pkt, Character* ch, uint32_t npc_i
     pkt.z = pos.z;
     pkt.yaw = 0.0f;
 
-    // Weapon and armour — left empty for now
-    pkt.weapon[0] = '\0';
+    // Send character GameData stringID in weapon field (reused for template lookup)
+    if (ch->data) {
+        std::strncpy(pkt.weapon, ch->data->stringID.c_str(), MAX_WEAPON_LENGTH - 1);
+        pkt.weapon[MAX_WEAPON_LENGTH - 1] = '\0';
+    } else {
+        pkt.weapon[0] = '\0';
+    }
     pkt.armour[0] = '\0';
 }
 
