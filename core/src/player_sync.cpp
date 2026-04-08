@@ -47,6 +47,7 @@ extern void host_sync_init();
 extern void host_sync_shutdown();
 extern void host_sync_tick(float dt);
 extern void host_sync_set_host(bool is_host);
+extern void host_sync_resend_all();
 extern bool host_sync_is_host();
 
 extern void admin_panel_init();
@@ -121,6 +122,10 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         SpawnNPC pkt;
         if (unpack(data, length, pkt)) {
             npc_manager_on_spawn(pkt);
+            // If we're the host and a new player joined, resend all synced NPCs
+            if (host_sync_is_host()) {
+                host_sync_resend_all();
+            }
         }
         break;
     }
