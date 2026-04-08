@@ -16,6 +16,7 @@
 
 #include <MyGUI.h>
 #include <OgreLogManager.h>
+#include "kmp_log.h"
 
 #include "packets.h"
 #include "protocol.h"
@@ -83,7 +84,7 @@ static void update_status_text();
 void ui_init() {
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (!gui) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] WARNING: MyGUI not available, UI disabled"
         );
         return;
@@ -247,15 +248,15 @@ void ui_init() {
     s_ui_initialized = true;
     s_ui_visible = false;
 
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] UI initialized");
+    KMP_LOG("[KenshiMP] UI initialized");
 
     } catch (std::exception& e) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             std::string("[KenshiMP] UI init failed: ") + e.what()
         );
         s_ui_initialized = false;
     } catch (...) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] UI init failed: unknown exception"
         );
         s_ui_initialized = false;
@@ -302,7 +303,7 @@ void ui_check_hotkey() {
     bool f9_down = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
     if (f9_down && !s_f9_was_down) {
         if (!client_is_connected()) {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connecting as HOST to 127.0.0.1:7777...");
+            KMP_LOG("[KenshiMP] F9: Connecting as HOST to 127.0.0.1:7777...");
             player_sync_set_requested_host(true);
             if (client_connect("127.0.0.1", 7777)) {
                 ConnectRequest req;
@@ -313,12 +314,12 @@ void ui_check_hotkey() {
                 req.is_host = 1;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
-                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connected!");
+                KMP_LOG("[KenshiMP] F9: Connected!");
             } else {
-                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Connection failed!");
+                KMP_LOG("[KenshiMP] F9: Connection failed!");
             }
         } else {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F9: Disconnecting...");
+            KMP_LOG("[KenshiMP] F9: Disconnecting...");
             client_disconnect();
         }
     }
@@ -329,7 +330,7 @@ void ui_check_hotkey() {
     bool f11_down = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
     if (f11_down && !s_f11_was_down) {
         if (!client_is_connected()) {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F11: Connecting as JOINER to 127.0.0.1:7777...");
+            KMP_LOG("[KenshiMP] F11: Connecting as JOINER to 127.0.0.1:7777...");
             player_sync_set_requested_host(false);
             if (client_connect("127.0.0.1", 7777)) {
                 ConnectRequest req;
@@ -340,12 +341,12 @@ void ui_check_hotkey() {
                 req.is_host = 0;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
-                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F11: Connected as joiner!");
+                KMP_LOG("[KenshiMP] F11: Connected as joiner!");
             } else {
-                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F11: Connection failed!");
+                KMP_LOG("[KenshiMP] F11: Connection failed!");
             }
         } else {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] F11: Disconnecting...");
+            KMP_LOG("[KenshiMP] F11: Disconnecting...");
             client_disconnect();
         }
     }
@@ -431,7 +432,7 @@ static void launch_server(uint16_t port) {
     }
 
     if (exe_path.empty()) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] Server exe not found! Place kenshi-mp-server.exe in mods/KenshiMP/");
         return;
     }
@@ -447,10 +448,10 @@ static void launch_server(uint16_t port) {
     if (CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
                        CREATE_NEW_CONSOLE, NULL, NULL, &si, &s_server_process)) {
         s_server_running = true;
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Server launched (PID: " +
+        KMP_LOG("[KenshiMP] Server launched (PID: " +
             itos(s_server_process.dwProcessId) + ")");
     } else {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Failed to launch server");
+        KMP_LOG("[KenshiMP] Failed to launch server");
     }
 }
 
@@ -461,7 +462,7 @@ static void stop_server() {
     CloseHandle(s_server_process.hProcess);
     CloseHandle(s_server_process.hThread);
     s_server_running = false;
-    Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Server stopped");
+    KMP_LOG("[KenshiMP] Server stopped");
 }
 
 static void do_connect(bool as_host) {

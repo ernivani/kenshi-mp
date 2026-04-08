@@ -22,6 +22,7 @@
 #include <OgreQuaternion.h>
 #include <OgreMath.h>
 #include <OgreLogManager.h>
+#include "kmp_log.h"
 
 #include "packets.h"
 #include "protocol.h"
@@ -130,7 +131,7 @@ void npc_manager_hide_local_npcs() {
     }
 
     s_local_npcs_hidden = true;
-    Ogre::LogManager::getSingleton().logMessage(
+    KMP_LOG(
         "[KenshiMP] Hidden " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
 }
 
@@ -146,7 +147,7 @@ void npc_manager_show_local_npcs() {
         }
     }
 
-    Ogre::LogManager::getSingleton().logMessage(
+    KMP_LOG(
         "[KenshiMP] Restored " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
     s_hidden_npcs.clear();
     s_local_npcs_hidden = false;
@@ -199,7 +200,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
 
     // Skip spawning if position is at origin (player hasn't sent position yet)
     if (pkt.x == 0.0f && pkt.y == 0.0f && pkt.z == 0.0f) {
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] Deferred NPC spawn for player " + itos(pkt.player_id) + " (no position yet)");
         s_remote_players[pkt.player_id] = rp;
         return;
@@ -214,7 +215,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
         if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
         if (!faction && ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
+            KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
         RootObjectBase* obj = factory->createRandomCharacter(
@@ -224,10 +225,10 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
             rp.npc = npc;
-            Ogre::LogManager::getSingleton().logMessage(
+            KMP_LOG(
                 "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
         } else {
-            Ogre::LogManager::getSingleton().logMessage(
+            KMP_LOG(
                 "[KenshiMP] WARNING: Failed to spawn NPC for player " + itos(pkt.player_id));
         }
     }
@@ -259,7 +260,7 @@ void npc_manager_on_state(const PlayerState& pkt) {
                 Character* npc = dynamic_cast<Character*>(obj);
                 if (npc) {
                     rp.npc = npc;
-                    Ogre::LogManager::getSingleton().logMessage(
+                    KMP_LOG(
                         "[KenshiMP] Late-spawned NPC for player " + itos(pkt.player_id));
                 }
             }
@@ -292,7 +293,7 @@ void npc_manager_on_disconnect(uint32_t player_id) {
         if (world) {
             world->destroy(it->second.npc, false, "KenshiMP disconnect");
         }
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] Despawned NPC for player " + itos(player_id));
     }
 
@@ -331,7 +332,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
         if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
         if (!faction && ou && ou->player) faction = ou->player->getFaction();
         if (!faction) {
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] WARNING: No faction available for NPC spawn");
+            KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
 
@@ -351,7 +352,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
             rnpc.npc = npc;
-            Ogre::LogManager::getSingleton().logMessage(
+            KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
                 " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
         }
@@ -388,7 +389,7 @@ void npc_manager_on_remote_despawn(uint32_t npc_id) {
         if (world) {
             world->destroy(it->second.npc, false, "KenshiMP NPC despawn");
         }
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] Despawned remote NPC " + itos(npc_id));
     }
 

@@ -10,6 +10,7 @@
 #include <kenshi/Character.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
+#include "kmp_log.h"
 
 #include "packets.h"
 #include "protocol.h"
@@ -244,7 +245,7 @@ void player_sync_tick(float dt) {
     if (s_was_connected && !client_is_connected()) {
         s_was_connected = false;
         s_auto_reconnect = true;
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Connection lost, will auto-reconnect...");
+        KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
         npc_manager_show_local_npcs();
         ui_on_disconnect();
     }
@@ -255,7 +256,7 @@ void player_sync_tick(float dt) {
         s_reconnect_timer += dt;
         if (s_reconnect_timer >= 3.0f) {
             s_reconnect_timer = 0.0f;
-            Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Attempting reconnect...");
+            KMP_LOG("[KenshiMP] Attempting reconnect...");
             if (client_connect("127.0.0.1", 7777)) {
                 ConnectRequest req;
                 std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
@@ -266,7 +267,7 @@ void player_sync_tick(float dt) {
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 s_auto_reconnect = false;
-                Ogre::LogManager::getSingleton().logMessage("[KenshiMP] Reconnected!");
+                KMP_LOG("[KenshiMP] Reconnected!");
             }
         }
     }

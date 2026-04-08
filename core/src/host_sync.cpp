@@ -20,6 +20,7 @@
 #include <kenshi/RaceData.h>
 #include <OgreVector3.h>
 #include <OgreLogManager.h>
+#include "kmp_log.h"
 
 #include "packets.h"
 #include "protocol.h"
@@ -72,7 +73,7 @@ void host_sync_shutdown() {
 void host_sync_set_host(bool is_host) {
     s_is_host = is_host;
     if (is_host) {
-        Ogre::LogManager::getSingleton().logMessage("[KenshiMP] This client is the HOST");
+        KMP_LOG("[KenshiMP] This client is the HOST");
     }
 }
 
@@ -123,7 +124,7 @@ void host_sync_spawn_test_npc(float x, float y, float z) {
         std::vector<uint8_t> buf = pack(spawn);
         client_send_reliable(buf.data(), buf.size());
 
-        Ogre::LogManager::getSingleton().logMessage(
+        KMP_LOG(
             "[KenshiMP] Spawned test NPC " + itos(npc_id) + " at host position");
     }
 }
