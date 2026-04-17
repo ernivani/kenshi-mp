@@ -27,10 +27,14 @@ static const size_t   MAX_MODEL_LENGTH   = 64;
 static const size_t   MAX_CHAT_LENGTH    = 256;
 
 static const float    NPC_SYNC_RADIUS     = 500.0f;
-static const float    NPC_SYNC_INTERVAL   = 1.0f / 20;
+static const float    NPC_SYNC_INTERVAL   = 1.0f / 20;       // 20Hz batch updates
 static const uint16_t MAX_NPC_BATCH       = 49;
 static const size_t   MAX_RACE_LENGTH     = 32;
 static const size_t   MAX_WEAPON_LENGTH   = 64;
 static const size_t   MAX_ARMOUR_LENGTH   = 64;
+
+static const float    BUILDING_SYNC_RADIUS   = 500.0f;
+static const float    BUILDING_SCAN_INTERVAL = 0.5f;          // 2 Hz
+static const size_t   MAX_STRINGID_LENGTH    = 96;
 
 } // namespace kmp

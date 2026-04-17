@@ -26,6 +26,8 @@ namespace PacketType {
     static const uint8_t COMBAT_DAMAGE      = 0x51;
     static const uint8_t PLAYER_COMBAT_STATS = 0x55;
     static const uint8_t COMBAT_TARGET      = 0x56;
+    static const uint8_t BUILDING_SPAWN_REMOTE   = 0x60;
+    static const uint8_t BUILDING_DESPAWN_REMOTE = 0x62;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +257,34 @@ struct CombatTarget {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::COMBAT_TARGET;
+    }
+};
+
+struct BuildingSpawnRemote {
+    PacketHeader header;
+    uint32_t     building_id;
+    char         stringID[MAX_STRINGID_LENGTH];
+    float        x, y, z;
+    float        qw, qx, qy, qz;
+    uint8_t      completed;
+    uint8_t      is_foliage;
+    int16_t      floor;
+
+    BuildingSpawnRemote() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::BUILDING_SPAWN_REMOTE;
+    }
+};
+
+struct BuildingDespawnRemote {
+    PacketHeader header;
+    uint32_t     building_id;
+
+    BuildingDespawnRemote() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::BUILDING_DESPAWN_REMOTE;
     }
 };
 
