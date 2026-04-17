@@ -30,16 +30,28 @@ Joiner Kenshi (v100 DLL)
 
 ## Build Setup
 
-### Core DLL (v100 — MUST use VS2010 toolset):
+### Core DLL (v100 compiler via Windows SDK 7.1):
 ```bash
-cmake -B build -T v100 -A x64 \
+cmake -B build -T Windows7.1SDK -A x64 \
   -DENET_DIR=deps/enet2 \
-  -DKENSHILIB_DIR=deps/KenshiLib \
+  -DKENSHILIB_DIR=deps/KenshiLib_Examples_deps/KenshiLib \
   -DKENSHILIB_EXAMPLES_DEPS=deps/KenshiLib_Examples_deps \
   -DBOOST_ROOT=deps/KenshiLib_Examples_deps/boost_1_60_0 \
   -DKENSHIMP_BUILD_CORE=ON -DKENSHIMP_BUILD_SERVER=OFF -DKENSHIMP_BUILD_INJECTOR=OFF
 cmake --build build --config Release --target KenshiMP
 ```
+
+**Toolchain prereqs (one-time, on a machine without VS2010):**
+1. Uninstall existing VC++ 2010 redists (x64+x86) — required before SDK 7.1 install
+2. Install Windows SDK 7.1 (https://www.microsoft.com/en-us/download/details.aspx?id=8442) — provides cl.exe v16 / v100 compiler + libs
+3. Install KB2519277 patch (https://www.microsoft.com/en-us/download/details.aspx?id=4422) — restores compiler after SP1
+4. Reinstall VC++ 2010 SP1 redists
+5. Create stub `C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\include\ammintrin.h` containing only `#pragma once` — works around missing AMD SSE4A header in VS2010+SDK7.1 combo
+6. Use CMake toolset `-T Windows7.1SDK` — NOT `-T v100`. v100 expects VS2010 IDE registry keys absent in SDK-only install; Windows7.1SDK toolset uses same v100 compiler but reads SDK 7.1 registry.
+
+**Deps cloned to `deps/`:**
+- `deps/enet2` — `git clone --branch v1.3.18 https://github.com/lsalzman/enet.git deps/enet2`, then `cmake -B build -A x64 && cmake --build build --config Release` inside it
+- `deps/KenshiLib_Examples_deps` — `git clone https://github.com/BFrizzleFoShizzle/KenshiLib_Examples_deps.git`, then PowerShell `Expand-Archive boost_1_60_0/boost.zip boost_1_60_0/`. Bundles KenshiLib SDK + Ogre/MyGUI precompiled libs under `KenshiLib/`.
 
 ### Server (VS2022):
 ```bash
