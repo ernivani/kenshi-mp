@@ -14,6 +14,7 @@
 
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
+#include <kenshi/GameData.h>
 #include <kenshi/Character.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/Faction.h>
