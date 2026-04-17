@@ -69,6 +69,8 @@ extern void building_manager_init();
 extern void building_manager_shutdown();
 extern void building_manager_on_remote_spawn(const BuildingSpawnRemote& pkt);
 extern void building_manager_on_remote_despawn(uint32_t building_id);
+extern void building_manager_hide_local_buildings();
+extern void building_manager_show_local_buildings();
 
 extern void admin_panel_init();
 extern void admin_panel_shutdown();
@@ -140,6 +142,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
             host_sync_set_host(s_requested_host);
             if (!s_requested_host) {
                 npc_manager_hide_local_npcs();
+                building_manager_hide_local_buildings();
             }
             ui_on_connect_accept(pkt.player_id);
         }
@@ -328,6 +331,7 @@ void player_sync_tick(float dt) {
         s_auto_reconnect = true;
         KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
         npc_manager_show_local_npcs();
+        building_manager_show_local_buildings();
         ui_on_disconnect();
     }
 
@@ -344,7 +348,7 @@ void player_sync_tick(float dt) {
                 req.name[MAX_NAME_LENGTH - 1] = '\0';
                 std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
                 req.model[MAX_MODEL_LENGTH - 1] = '\0';
-                req.is_host = 1;
+                req.is_host = s_requested_host ? 1 : 0;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 s_auto_reconnect = false;
