@@ -1,7 +1,11 @@
 # Build output
 build/
 build_server/
+build_injector/
 out/
+
+# Claude Code worktrees / local agent state
+.claude/
 
 # Dependencies (cloned/extracted locally)
 deps/
