@@ -283,6 +283,12 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     case PacketType::NPC_DESPAWN_REMOTE:
         handle_npc_packet(peer, data, length, true);
         break;
+    case PacketType::BUILDING_SPAWN_REMOTE:
+        handle_npc_packet(peer, data, length, true);
+        break;
+    case PacketType::BUILDING_DESPAWN_REMOTE:
+        handle_npc_packet(peer, data, length, true);
+        break;
     case PacketType::COMBAT_ATTACK:
         handle_combat_to_host(peer, data, length);
         break;
