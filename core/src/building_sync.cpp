@@ -18,7 +18,7 @@
 #include <kenshi/GameData.h>
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
-#include <kenshi/Building.h>
+#include <kenshi/Building/Building.h>
 #include <kenshi/Character.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectBase.h>
