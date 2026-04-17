@@ -25,7 +25,7 @@ KenshiLib is undocumented. Every crash costs 10+ minutes of game restart + hook 
 
 **USE INSTEAD:** `obj->setVisible(false)` (RootObject pure virtual at vtable offset 0x100) — does not crash. Limitation: setVisible only hides the main mesh; LOD imposters / terrain-baked decoration stay visible. For full invisibility we'd need to also disable Ogre scene-node rendering or teleport the buildings (untested).
 
-**How to apply:** Joiner-side wipe must use setVisible — NEVER destroy. If setVisible isn't enough visually, investigate teleporting via `Building::setStartPosition` / `setEndPosition` (virtuals at vtable offset 0xA0/0xA8), but probe one building at a time first.
+**SUPERSEDED** by entries below — `destroy` and `dynamicDestroyBuilding` DO work, but only one at a time (batch=1). See 2026-04-18 entries.
 
 ---
 
@@ -39,3 +39,23 @@ KenshiLib is undocumented. Every crash costs 10+ minutes of game restart + hook 
 **How to apply:** When setting up RE_Kenshi on a fresh machine, download `RE_Kenshi_vX.Y.Z.zip` (NOT the `_loose.zip`). Run the installer, point at the Kenshi install dir, click Install. Don't try to manually copy the loose files — the installer also wires shortcuts, registry keys, and the auto-launch hook.
 
 Manual loose-files install ALSO fails: even after copying `install/*` to Kenshi root and adding `Plugin=RE_Kenshi` to `Plugins_x64.cfg`, RE_Kenshi log shows "Version incompatible, restarting... UNKNOWN Unknown" + "KenshiLib could not detect Kenshi version" because the loose package only ships RVAs for 1.0.65 and the auto-restart-into-downgraded-exe trick the installer sets up isn't present.
+
+---
+
+### 2026-04-18 — `ou->destroy()` leaves physics/collision bodies behind
+**Symptom:** Buildings disappear visually but joiner character is blocked by invisible collision walls where buildings used to be.
+
+**Cause:** `ou->destroy(obj, false, "KenshiMP")` removes the visual mesh but does NOT clean up the PhysX/Havok collision bodies. Calling `obj->destroyPhysical()` before `ou->destroy()` also doesn't help.
+
+**Fix:** Use `ou->dynamicDestroyBuilding(hand(obj))` for buildings — this is the game's native building demolition path and properly tears down collision. Keep `ou->destroy()` for items only (no significant collision).
+
+---
+
+### 2026-04-18 — Batch destroying buildings crashes (even with dynamicDestroyBuilding)
+**Symptom:** Destroying >1 building per scan tick crashes. Tested with both `ou->destroy()` (batch=5) and `dynamicDestroyBuilding()` (batch=5). Both crash mid-batch.
+
+**Cause:** Cascade invalidation — destroying one building can cascade-free related buildings that are still in the scan results array. The second/third/etc destroy in the same batch then hits freed memory.
+
+**DO NOT:** Set `BATCH_PER_TICK` above 1 in `building_manager.cpp`.
+
+**USE INSTEAD:** `BATCH_PER_TICK=1` with `WIPE_INTERVAL=0.1f` (100ms). This gives ~10 destroys/sec throughput. Each destroy gets its own fresh scan, so cascade invalidation can't corrupt the results. To increase throughput, reduce `WIPE_INTERVAL` — never increase batch size.

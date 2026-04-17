@@ -3,7 +3,6 @@
 
 #include <map>
 #include <set>
-#include <vector>
 #include <string>
 #include <sstream>
 #include <cstring>
@@ -13,9 +12,10 @@
 #include <kenshi/GameWorld.h>
 #include <kenshi/GameData.h>
 #include <kenshi/GameDataManager.h>
-#include <kenshi/Building.h>
+#include <kenshi/Building/Building.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/RootObjectBase.h>
+#include <kenshi/util/hand.h>
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/Character.h>
 #include <kenshi/Faction.h>
@@ -32,12 +32,6 @@ namespace kmp {
 static std::map<uint32_t, Building*> s_remote_buildings;   // building_id → puppet
 static std::set<uint64_t>             s_remote_keys;       // Building* keys (for dedup with host scan)
 
-struct PendingDestroy {
-    RootObject* obj;
-    int         type;
-    std::string sid_snapshot;
-};
-static std::vector<PendingDestroy>  s_destroy_queue;
 static std::set<std::string>        s_skip_sids;
 
 static std::string itos_bm(uint32_t v) {
@@ -54,29 +48,22 @@ bool building_manager_is_remote(Building* b) {
 void building_manager_init() {
     s_remote_buildings.clear();
     s_remote_keys.clear();
-    s_destroy_queue.clear();
     s_skip_sids.clear();
 }
 
 void building_manager_shutdown() {
     s_remote_buildings.clear();
     s_remote_keys.clear();
-    s_destroy_queue.clear();
     s_skip_sids.clear();
 }
 
 // ---------------------------------------------------------------------------
-// Joiner-side wipe: destroy local world objects in small batches with
-// per-object logging so the last log line before a crash names the culprit.
-// Bulk destroy is the goal but crashes randomly — instrumented mode below.
+// Joiner-side wipe: destroy local world objects in small batches.
 //
-// Strategy:
-//   1. Build queue of (RootObject*, type, stringID-snapshot) at hide() time
-//   2. Each tick, destroy up to BATCH_PER_TICK objects from the queue
-//   3. Log EACH destroy attempt BEFORE the call so the crash log shows
-//      the last attempted object
-//   4. Once queue is drained, switch to scan-mode that catches newly
-//      streamed chunks
+// Scan-every-tick mode: each tick re-scans the world and destroys up to
+// BATCH_PER_TICK objects directly from the fresh results. No queue is held
+// between ticks, so pointers can't go stale when the streaming system
+// invalidates RootObject* as chunks page out.
 //
 // Skip-list grows from observed crashes: when a stringID crashes the game,
 // add it to s_skip_sids and the joiner re-runs without that one.
@@ -84,8 +71,8 @@ void building_manager_shutdown() {
 
 static bool   s_wipe_active   = false;
 static float  s_wipe_timer    = 0.0f;
-static const float WIPE_INTERVAL    = 0.5f;
-static const int   BATCH_PER_TICK   = 5;        // tiny batches → easy to bisect
+static const float WIPE_INTERVAL    = 0.1f;     // 100ms between destroys
+static const int   BATCH_PER_TICK   = 1;        // ONE per scan — cascade-safe
 
 static const char* type_name(int t) {
     if (t == BUILDING) return "BUILDING";
@@ -108,16 +95,25 @@ static std::string snapshot_sid(RootObject* obj, int type) {
     return std::string("(no-sid)");
 }
 
-static void enqueue_objects_of_type(int type, int& count_out) {
-    if (!ou || !ou->player) return;
+// Scan one itemType, find the closest eligible object, and destroy it.
+// Only ONE object per call — avoids cascade invalidation within a batch.
+// Returns 1 if destroyed, 0 if nothing found.
+static int scan_and_destroy(int type) {
+    if (!ou || !ou->player) return 0;
+
     const lektor<Character*>& players = ou->player->getAllPlayerCharacters();
-    if (players.count == 0) return;
+    if (players.count == 0) return 0;
     Character* anchor = players.stuff[0];
-    if (!anchor) return;
+    if (!anchor) return 0;
     Ogre::Vector3 center = anchor->getPosition();
 
     lektor<RootObject*> results;
     ou->getObjectsWithinSphere(results, center, 50000.0f, (itemType)type, 99999, NULL);
+
+    // Find the closest eligible object
+    RootObject* closest = NULL;
+    float closest_dist2 = 1e30f;
+    std::string closest_sid;
 
     for (uint32_t i = 0; i < results.count; ++i) {
         RootObject* obj = results.stuff[i];
@@ -127,36 +123,47 @@ static void enqueue_objects_of_type(int type, int& count_out) {
         std::string sid = snapshot_sid(obj, type);
         if (s_skip_sids.find(sid) != s_skip_sids.end()) continue;
 
-        PendingDestroy pd;
-        pd.obj  = obj;
-        pd.type = type;
-        pd.sid_snapshot = sid;
-        s_destroy_queue.push_back(pd);
-        count_out++;
+        Ogre::Vector3 pos = obj->getPosition();
+        float dist2 = center.squaredDistance(pos);
+        if (dist2 < closest_dist2) {
+            closest = obj;
+            closest_dist2 = dist2;
+            closest_sid = sid;
+        }
     }
+
+    if (!closest) return 0;
+
+    KMP_LOG(std::string("[KenshiMP] DESTROY type=") + type_name(type)
+        + " ptr=" + itos_bm((uint32_t)((uint64_t)(uintptr_t)closest & 0xFFFFFFFF))
+        + " sid='" + closest_sid + "'");
+
+    if (type == BUILDING) {
+        // Use the game's native building demolition path — handles
+        // physics/collision cleanup that ou->destroy() misses.
+        hand h(static_cast<RootObjectBase*>(closest));
+        ou->dynamicDestroyBuilding(h);
+    } else {
+        ou->destroy(closest, false, "KenshiMP");
+    }
+
+    KMP_LOG("[KenshiMP] DESTROY ok");
+    return 1;
 }
 
 void building_manager_hide_local_buildings() {
-    s_destroy_queue.clear();
-    int buildings = 0, items = 0;
-    enqueue_objects_of_type(BUILDING, buildings);
-    enqueue_objects_of_type(ITEM,     items);
-    KMP_LOG("[KenshiMP] Wipe: queued " + itos_bm((uint32_t)buildings) + " buildings + "
-        + itos_bm((uint32_t)items) + " items for destroy (batches of "
-        + itos_bm((uint32_t)BATCH_PER_TICK) + " per " + itos_bm((uint32_t)(WIPE_INTERVAL*1000)) + "ms)");
+    KMP_LOG("[KenshiMP] Wipe active (scan-every-tick mode, batch="
+        + itos_bm((uint32_t)BATCH_PER_TICK) + " per "
+        + itos_bm((uint32_t)(WIPE_INTERVAL*1000)) + "ms)");
     s_wipe_active = true;
     s_wipe_timer = 0.0f;
 }
 
 void building_manager_show_local_buildings() {
-    s_destroy_queue.clear();
     s_wipe_active = false;
     KMP_LOG("[KenshiMP] Wipe deactivated (destroyed objects NOT restored — reload save)");
 }
 
-// Called every frame while connected. Destroys up to BATCH_PER_TICK queued
-// objects per WIPE_INTERVAL. Each destroy is logged BEFORE the call so the
-// crash log identifies the offending object.
 void building_manager_wipe_tick(float dt) {
     if (!s_wipe_active) return;
     if (!ou) return;
@@ -165,31 +172,10 @@ void building_manager_wipe_tick(float dt) {
     if (s_wipe_timer < WIPE_INTERVAL) return;
     s_wipe_timer = 0.0f;
 
-    // Top up queue by re-scanning (catches newly streamed chunks)
-    if (s_destroy_queue.empty()) {
-        int b = 0, i = 0;
-        enqueue_objects_of_type(BUILDING, b);
-        enqueue_objects_of_type(ITEM,     i);
-        if (b + i > 0) {
-            KMP_LOG("[KenshiMP] Wipe scan: enqueued " + itos_bm((uint32_t)b) + " buildings + "
-                + itos_bm((uint32_t)i) + " items from streamed chunks");
-        }
-    }
-
-    int destroyed = 0;
-    while (destroyed < BATCH_PER_TICK && !s_destroy_queue.empty()) {
-        PendingDestroy pd = s_destroy_queue.back();
-        s_destroy_queue.pop_back();
-
-        if (!pd.obj) continue;
-
-        KMP_LOG(std::string("[KenshiMP] DESTROY type=") + type_name(pd.type)
-            + " ptr=" + itos_bm((uint32_t)((uint64_t)(uintptr_t)pd.obj & 0xFFFFFFFF))
-            + " sid='" + pd.sid_snapshot + "'");
-        ou->destroy(pd.obj, false, "KenshiMP");
-        KMP_LOG(std::string("[KenshiMP] DESTROY ok"));
-        destroyed++;
-    }
+    // Destroy one object per tick — items first, then buildings.
+    // Only one per scan prevents cascade from invalidating other results.
+    if (!scan_and_destroy(ITEM))
+        scan_and_destroy(BUILDING);
 }
 
 uint32_t building_manager_get_remote_count() {
