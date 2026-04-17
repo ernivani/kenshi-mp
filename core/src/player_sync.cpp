@@ -60,6 +60,16 @@ extern void host_sync_resend_all();
 extern bool host_sync_is_host();
 extern void host_sync_on_combat_attack(const CombatAttack& pkt);
 
+extern void building_sync_init();
+extern void building_sync_shutdown();
+extern void building_sync_tick(float dt);
+extern void building_sync_resend_all();
+
+extern void building_manager_init();
+extern void building_manager_shutdown();
+extern void building_manager_on_remote_spawn(const BuildingSpawnRemote& pkt);
+extern void building_manager_on_remote_despawn(uint32_t building_id);
+
 extern void admin_panel_init();
 extern void admin_panel_shutdown();
 extern void admin_panel_check_hotkey();
@@ -143,6 +153,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
             // If we're the host and a new player joined, resend all synced NPCs
             if (host_sync_is_host()) {
                 host_sync_resend_all();
+                building_sync_resend_all();
             }
         }
         break;
@@ -216,6 +227,26 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::BUILDING_SPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            BuildingSpawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                building_manager_on_remote_spawn(pkt);
+            }
+        }
+        break;
+    }
+
+    case PacketType::BUILDING_DESPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            BuildingDespawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                building_manager_on_remote_despawn(pkt.building_id);
+            }
+        }
+        break;
+    }
+
     case PacketType::COMBAT_ATTACK: {
         if (host_sync_is_host()) {
             CombatAttack pkt;
@@ -258,6 +289,8 @@ void player_sync_init() {
     s_send_timer = 0.0f;
     client_set_packet_callback(on_packet_received);
     host_sync_init();
+    building_sync_init();
+    building_manager_init();
     admin_panel_init();
     s_initialized = true;
 }
@@ -328,6 +361,9 @@ void player_sync_tick(float dt) {
 
     // Host: scan and send NPC state to server
     host_sync_tick(dt);
+
+    // Host: scan and send building spawn/despawn
+    building_sync_tick(dt);
 
     // Send local player state at tick rate
     s_send_timer += dt;
