@@ -366,11 +366,12 @@ static void launch_server(uint16_t port) {
     // Try common paths
     const char* paths[] = {
         "mods\\KenshiMP\\kenshi-mp-server.exe",
+        "mods\\KenshiMP\\kenshi-mp-server2.exe",
         "kenshi-mp-server.exe",
     };
 
     std::string exe_path;
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         DWORD attr = GetFileAttributesA(paths[i]);
         if (attr != INVALID_FILE_ATTRIBUTES) {
             exe_path = paths[i];

@@ -295,6 +295,12 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     case PacketType::COMBAT_DAMAGE:
         handle_npc_packet(peer, data, length, true);
         break;
+    case PacketType::PLAYER_COMBAT_STATS:
+        handle_combat_to_host(peer, data, length);
+        break;
+    case PacketType::COMBAT_TARGET:
+        handle_combat_to_host(peer, data, length);
+        break;
     default:
         spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header.type));
         break;

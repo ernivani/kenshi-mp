@@ -171,6 +171,32 @@ static bool s_local_npcs_hidden = false;
 // ---------------------------------------------------------------------------
 // Init / Shutdown
 // ---------------------------------------------------------------------------
+uint32_t npc_manager_get_nearest_remote_npc(float px, float py, float pz, float max_range) {
+    float best_dist_sq = max_range * max_range;
+    uint32_t best_id = 0;
+
+    std::map<uint32_t, RemoteNPC>::iterator it;
+    for (it = s_remote_npcs.begin(); it != s_remote_npcs.end(); ++it) {
+        if (!it->second.npc) continue;
+        Ogre::Vector3 pos = it->second.npc->getPosition();
+        float dx = px - pos.x;
+        float dy = py - pos.y;
+        float dz = pz - pos.z;
+        float d = dx*dx + dy*dy + dz*dz;
+        if (d < best_dist_sq) {
+            best_dist_sq = d;
+            best_id = it->second.npc_id;
+        }
+    }
+    return best_id;
+}
+
+Character* npc_manager_get_player_avatar(uint32_t player_id) {
+    std::map<uint32_t, RemotePlayer>::iterator it = s_remote_players.find(player_id);
+    if (it != s_remote_players.end()) return it->second.npc;
+    return NULL;
+}
+
 bool npc_manager_is_player_npc(Character* ch) {
     std::map<uint32_t, RemotePlayer>::iterator it;
     for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
@@ -459,21 +485,9 @@ void npc_manager_on_remote_state(const NPCStateEntry& entry) {
         float dz = target.z - current.z;
         float dist_sq = dx*dx + dy*dy + dz*dz;
 
-        if (dist_sq > 100.0f * 100.0f) {
-            // Far away — teleport immediately
-            Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
-            rnpc.npc->teleport(target, rot);
-        } else {
-            // Close enough — use setDestination for natural walking animation
-            CharMovement* movement = rnpc.npc->getMovement();
-            if (movement) {
-                movement->setDestination(target, HIGH_PRIORITY, false);
-            } else {
-                // Fallback to teleport
-                Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
-                rnpc.npc->teleport(target, rot);
-            }
-        }
+        // Always teleport — setDestination gets overridden by NPC AI
+        Ogre::Quaternion rot(Ogre::Radian(entry.yaw), Ogre::Vector3::UNIT_Y);
+        rnpc.npc->teleport(target, rot);
     }
 }
 
@@ -574,77 +588,8 @@ void npc_manager_update(float dt) {
 
     // Remote NPCs use setDestination from on_remote_state, no interpolation loop needed
 
-    // Joiner: proximity-based attack detection
-    if (!host_sync_is_host() && client_is_connected()) {
-        static float s_attack_cooldown = 0.0f;
-        s_attack_cooldown -= dt;
-
-        if (s_attack_cooldown <= 0.0f) {
-            Character* player = game_get_player_character();
-            if (player && player->getMovementSpeed() > 5.0f) {
-                Ogre::Vector3 player_pos = player->getPosition();
-
-                std::map<uint32_t, RemoteNPC>::iterator atk_it;
-                for (atk_it = s_remote_npcs.begin(); atk_it != s_remote_npcs.end(); ++atk_it) {
-                    if (!atk_it->second.npc) continue;
-
-                    Ogre::Vector3 npc_pos = atk_it->second.npc->getPosition();
-                    float adx = player_pos.x - npc_pos.x;
-                    float adz = player_pos.z - npc_pos.z;
-                    float adist_sq = adx*adx + adz*adz;
-
-                    if (adist_sq < 8.0f * 8.0f) {
-                        CombatAttack atk;
-                        atk.target_npc_id = atk_it->second.npc_id;
-                        atk.cut_damage = 20.0f;
-                        atk.blunt_damage = 10.0f;
-                        atk.pierce_damage = 0.0f;
-
-                        std::vector<uint8_t> buf = pack(atk);
-                        client_send_reliable(buf.data(), buf.size());
-
-                        s_attack_cooldown = 1.0f;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Host: detect damage to remote player avatars
-    // TODO: disabled — getMedical() crashes on createRandomCharacter NPCs
-    if (false && host_sync_is_host() && client_is_connected()) {
-        std::map<uint32_t, RemotePlayer>::iterator dmg_it;
-        for (dmg_it = s_remote_players.begin(); dmg_it != s_remote_players.end(); ++dmg_it) {
-            RemotePlayer& rp = dmg_it->second;
-            if (!rp.npc) continue;
-
-            MedicalSystem* med = rp.npc->getMedical();
-            if (!med || med->anatomy.count <= 0) continue;
-
-            MedicalSystem::HealthPartStatus* part = med->anatomy.stuff[0];
-            if (!part) continue;
-
-            float current_hp = part->_maxHealth;
-
-            if (rp.last_health >= 0.0f && current_hp < rp.last_health) {
-                float damage = rp.last_health - current_hp;
-
-                CombatDamage dmg_pkt;
-                dmg_pkt.player_id = rp.player_id;
-                dmg_pkt.cut_damage = damage * 0.5f;
-                dmg_pkt.blunt_damage = damage * 0.5f;
-                dmg_pkt.pierce_damage = 0.0f;
-
-                std::vector<uint8_t> buf = pack(dmg_pkt);
-                client_send_reliable(buf.data(), buf.size());
-
-                KMP_LOG("[KenshiMP] Combat: avatar took " + itos(static_cast<uint32_t>(damage)) + " damage");
-            }
-
-            rp.last_health = current_hp;
-        }
-    }
+    // Combat: host applies stats and initiates combat for joiner avatars
+    // (handled via packets in player_sync.cpp → host_sync.cpp)
 }
 
 } // namespace kmp
