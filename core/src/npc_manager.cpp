@@ -160,13 +160,11 @@ struct RemoteNPC {
 
 static std::map<uint32_t, RemoteNPC> s_remote_npcs;
 
-// Track hidden local NPCs (joiner mode)
-struct HiddenNPC {
-    Character* ch;
-    float orig_x, orig_y, orig_z;
-};
-static std::vector<HiddenNPC> s_hidden_npcs;
-static bool s_local_npcs_hidden = false;
+// Joiner-side NPC wipe: destroy local NPCs one per tick (same pattern as
+// building_manager — batch>1 crashes due to cascade invalidation).
+static bool  s_npc_wipe_active = false;
+static float s_npc_wipe_timer  = 0.0f;
+static const float NPC_WIPE_INTERVAL = 0.1f;  // 100ms between destroys
 
 // ---------------------------------------------------------------------------
 // Init / Shutdown
@@ -210,51 +208,16 @@ void npc_manager_init() {
 }
 
 void npc_manager_hide_local_npcs() {
-    if (s_local_npcs_hidden) return;
-    if (!ou) return;
-
-    const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
-    ogre_unordered_set<Character*>::type::const_iterator it;
-    for (it = chars.begin(); it != chars.end(); ++it) {
-        Character* ch = *it;
-        if (!ch) continue;
-        if (ch->isPlayerCharacter()) continue;
-
-        Ogre::Vector3 pos = ch->getPosition();
-        HiddenNPC hidden;
-        hidden.ch = ch;
-        hidden.orig_x = pos.x;
-        hidden.orig_y = pos.y;
-        hidden.orig_z = pos.z;
-        s_hidden_npcs.push_back(hidden);
-
-        // Teleport far underground
-        Ogre::Vector3 hide_pos(pos.x, -99999.0f, pos.z);
-        Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
-        ch->teleport(hide_pos, rot);
-    }
-
-    s_local_npcs_hidden = true;
-    KMP_LOG(
-        "[KenshiMP] Hidden " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
+    if (s_npc_wipe_active) return;
+    s_npc_wipe_active = true;
+    s_npc_wipe_timer = 0.0f;
+    KMP_LOG("[KenshiMP] NPC wipe active (scan-every-tick, 1 per "
+        + itos(static_cast<uint32_t>(NPC_WIPE_INTERVAL * 1000)) + "ms)");
 }
 
 void npc_manager_show_local_npcs() {
-    if (!s_local_npcs_hidden) return;
-
-    for (size_t i = 0; i < s_hidden_npcs.size(); ++i) {
-        HiddenNPC& h = s_hidden_npcs[i];
-        if (h.ch) {
-            Ogre::Vector3 pos(h.orig_x, h.orig_y, h.orig_z);
-            Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
-            h.ch->teleport(pos, rot);
-        }
-    }
-
-    KMP_LOG(
-        "[KenshiMP] Restored " + itos(static_cast<uint32_t>(s_hidden_npcs.size())) + " local NPCs");
-    s_hidden_npcs.clear();
-    s_local_npcs_hidden = false;
+    s_npc_wipe_active = false;
+    KMP_LOG("[KenshiMP] NPC wipe deactivated (destroyed NPCs NOT restored — reload save)");
 }
 
 void npc_manager_shutdown() {
@@ -522,32 +485,56 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
-    // Hide local NPCs on joiner (game keeps spawning new ones)
-    if (s_local_npcs_hidden && ou) {
-        // Build a set of our synced NPC pointers for fast lookup
-        std::set<Character*> our_npcs;
-        std::map<uint32_t, RemoteNPC>::iterator rn;
-        for (rn = s_remote_npcs.begin(); rn != s_remote_npcs.end(); ++rn) {
-            if (rn->second.npc) our_npcs.insert(rn->second.npc);
-        }
-        std::map<uint32_t, RemotePlayer>::iterator rp;
-        for (rp = s_remote_players.begin(); rp != s_remote_players.end(); ++rp) {
-            if (rp->second.npc) our_npcs.insert(rp->second.npc);
-        }
+    // Destroy local NPCs on joiner — one per tick, closest first
+    if (s_npc_wipe_active && ou) {
+        s_npc_wipe_timer += dt;
+        if (s_npc_wipe_timer >= NPC_WIPE_INTERVAL) {
+            s_npc_wipe_timer = 0.0f;
 
-        const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
-        ogre_unordered_set<Character*>::type::const_iterator hide_it;
-        for (hide_it = chars.begin(); hide_it != chars.end(); ++hide_it) {
-            Character* ch = *hide_it;
-            if (!ch) continue;
-            if (ch->isPlayerCharacter()) continue;
-            if (our_npcs.count(ch)) continue;  // don't hide our synced NPCs
+            // Build set of our synced NPC pointers to skip
+            std::set<Character*> our_npcs;
+            std::map<uint32_t, RemoteNPC>::iterator rn;
+            for (rn = s_remote_npcs.begin(); rn != s_remote_npcs.end(); ++rn) {
+                if (rn->second.npc) our_npcs.insert(rn->second.npc);
+            }
+            std::map<uint32_t, RemotePlayer>::iterator rp;
+            for (rp = s_remote_players.begin(); rp != s_remote_players.end(); ++rp) {
+                if (rp->second.npc) our_npcs.insert(rp->second.npc);
+            }
 
-            Ogre::Vector3 pos = ch->getPosition();
-            if (pos.y > -90000.0f) {
-                Ogre::Vector3 hide_pos(pos.x, -99999.0f, pos.z);
-                Ogre::Quaternion rot(Ogre::Radian(0), Ogre::Vector3::UNIT_Y);
-                ch->teleport(hide_pos, rot);
+            // Find closest non-player, non-synced NPC
+            Character* player_ch = game_get_player_character();
+            Ogre::Vector3 center(0, 0, 0);
+            if (player_ch) center = player_ch->getPosition();
+
+            Character* closest = NULL;
+            float closest_dist2 = 1e30f;
+
+            const ogre_unordered_set<Character*>::type& chars = ou->getCharacterUpdateList();
+            ogre_unordered_set<Character*>::type::const_iterator cit;
+            for (cit = chars.begin(); cit != chars.end(); ++cit) {
+                Character* ch = *cit;
+                if (!ch) continue;
+                if (ch->isPlayerCharacter()) continue;
+                if (our_npcs.count(ch)) continue;
+
+                if (player_ch) {
+                    float d2 = center.squaredDistance(ch->getPosition());
+                    if (d2 < closest_dist2) {
+                        closest = ch;
+                        closest_dist2 = d2;
+                    }
+                } else {
+                    closest = ch;
+                    break;
+                }
+            }
+
+            if (closest) {
+                KMP_LOG("[KenshiMP] DESTROY NPC ptr="
+                    + itos(static_cast<uint32_t>((uint64_t)(uintptr_t)closest & 0xFFFFFFFF)));
+                ou->destroy(closest, false, "KenshiMP");
+                KMP_LOG("[KenshiMP] DESTROY NPC ok");
             }
         }
     }
