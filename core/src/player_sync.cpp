@@ -8,7 +8,11 @@
 #include <string>
 #include <sstream>
 
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
 #include <kenshi/Character.h>
+#include <kenshi/CharStats.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Enums.h>
 #include <OgreVector3.h>
@@ -51,6 +55,7 @@ extern void npc_manager_on_remote_despawn(uint32_t npc_id);
 extern void npc_manager_update(float dt);
 extern void npc_manager_hide_local_npcs();
 extern void npc_manager_show_local_npcs();
+extern uint32_t npc_manager_get_nearest_remote_npc(float px, float py, float pz, float max_range);
 
 extern void host_sync_init();
 extern void host_sync_shutdown();
@@ -59,6 +64,8 @@ extern void host_sync_set_host(bool is_host);
 extern void host_sync_resend_all();
 extern bool host_sync_is_host();
 extern void host_sync_on_combat_attack(const CombatAttack& pkt);
+extern void host_sync_on_combat_stats(const PlayerCombatStats& pkt);
+extern void host_sync_on_combat_target(const CombatTarget& pkt);
 
 extern void building_sync_init();
 extern void building_sync_shutdown();
@@ -144,6 +151,24 @@ static void on_packet_received(const uint8_t* data, size_t length) {
             if (!s_requested_host) {
                 npc_manager_hide_local_npcs();
                 building_manager_hide_local_buildings();
+                // Send combat stats to host
+                Character* local_ch = game_get_player_character();
+                if (local_ch) {
+                    CharStats* st = local_ch->getStats();
+                    if (st) {
+                        PlayerCombatStats stats_pkt;
+                        stats_pkt.player_id = pkt.player_id;
+                        stats_pkt.strength = st->_strength;
+                        stats_pkt.dexterity = st->_dexterity;
+                        stats_pkt.toughness = st->_toughness;
+                        stats_pkt.melee_attack = st->__meleeAttack;
+                        stats_pkt.melee_defence = st->_meleeDefence;
+                        stats_pkt.athletics = st->_athletics;
+                        std::vector<uint8_t> buf = pack(stats_pkt);
+                        client_send_reliable(buf.data(), buf.size());
+                        KMP_LOG("[KenshiMP] Sent combat stats to host");
+                    }
+                }
             }
             ui_on_connect_accept(pkt.player_id);
         }
@@ -276,6 +301,26 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::PLAYER_COMBAT_STATS: {
+        if (host_sync_is_host()) {
+            PlayerCombatStats pkt;
+            if (unpack(data, length, pkt)) {
+                host_sync_on_combat_stats(pkt);
+            }
+        }
+        break;
+    }
+
+    case PacketType::COMBAT_TARGET: {
+        if (host_sync_is_host()) {
+            CombatTarget pkt;
+            if (unpack(data, length, pkt)) {
+                host_sync_on_combat_target(pkt);
+            }
+        }
+        break;
+    }
+
     default:
         break;
     }
@@ -319,6 +364,26 @@ void player_sync_tick(float dt) {
     ui_check_hotkey();
     admin_panel_check_hotkey();
     admin_panel_update(dt);
+
+    // F12: attack nearest synced NPC (joiner only)
+    static bool s_f12_was_down = false;
+    bool f12_down = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
+    if (f12_down && !s_f12_was_down && client_is_connected() && !host_sync_is_host()) {
+        Character* player = game_get_player_character();
+        if (player) {
+            Ogre::Vector3 pos = player->getPosition();
+            uint32_t target_id = npc_manager_get_nearest_remote_npc(pos.x, pos.y, pos.z, 50.0f);
+            if (target_id > 0) {
+                CombatTarget tgt;
+                tgt.player_id = client_get_local_id();
+                tgt.target_npc_id = target_id;
+                std::vector<uint8_t> buf = pack(tgt);
+                client_send_reliable(buf.data(), buf.size());
+                KMP_LOG("[KenshiMP] F12: targeting NPC " + itos(target_id));
+            }
+        }
+    }
+    s_f12_was_down = f12_down;
 
     // Poll network if connected
     if (client_is_connected()) {
@@ -374,6 +439,31 @@ void player_sync_tick(float dt) {
 
     // Joiner: continuously wipe locally-streamed buildings/items
     building_manager_wipe_tick(dt);
+
+    // Joiner: periodically re-send combat stats (handles timing + leveling)
+    if (!host_sync_is_host()) {
+        static float s_stats_timer = 3.0f;  // send 3 seconds after connect, then every 30s
+        s_stats_timer -= dt;
+        if (s_stats_timer <= 0.0f) {
+            s_stats_timer = 30.0f;
+            Character* local_ch = game_get_player_character();
+            if (local_ch) {
+                CharStats* st = local_ch->getStats();
+                if (st) {
+                    PlayerCombatStats stats_pkt;
+                    stats_pkt.player_id = client_get_local_id();
+                    stats_pkt.strength = st->_strength;
+                    stats_pkt.dexterity = st->_dexterity;
+                    stats_pkt.toughness = st->_toughness;
+                    stats_pkt.melee_attack = st->__meleeAttack;
+                    stats_pkt.melee_defence = st->_meleeDefence;
+                    stats_pkt.athletics = st->_athletics;
+                    std::vector<uint8_t> buf = pack(stats_pkt);
+                    client_send_reliable(buf.data(), buf.size());
+                }
+            }
+        }
+    }
 
     // Send local player state at tick rate
     s_send_timer += dt;
