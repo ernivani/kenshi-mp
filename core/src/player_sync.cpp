@@ -67,6 +67,19 @@ extern void host_sync_on_combat_attack(const CombatAttack& pkt);
 extern void host_sync_on_combat_stats(const PlayerCombatStats& pkt);
 extern void host_sync_on_combat_target(const CombatTarget& pkt);
 
+extern void building_sync_init();
+extern void building_sync_shutdown();
+extern void building_sync_tick(float dt);
+extern void building_sync_resend_all();
+
+extern void building_manager_init();
+extern void building_manager_shutdown();
+extern void building_manager_on_remote_spawn(const BuildingSpawnRemote& pkt);
+extern void building_manager_on_remote_despawn(uint32_t building_id);
+extern void building_manager_hide_local_buildings();
+extern void building_manager_show_local_buildings();
+extern void building_manager_wipe_tick(float dt);
+
 extern void admin_panel_init();
 extern void admin_panel_shutdown();
 extern void admin_panel_check_hotkey();
@@ -137,6 +150,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
             host_sync_set_host(s_requested_host);
             if (!s_requested_host) {
                 npc_manager_hide_local_npcs();
+                building_manager_hide_local_buildings();
                 // Send combat stats to host
                 Character* local_ch = game_get_player_character();
                 if (local_ch) {
@@ -168,6 +182,7 @@ static void on_packet_received(const uint8_t* data, size_t length) {
             // If we're the host and a new player joined, resend all synced NPCs
             if (host_sync_is_host()) {
                 host_sync_resend_all();
+                building_sync_resend_all();
             }
         }
         break;
@@ -241,6 +256,26 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::BUILDING_SPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            BuildingSpawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                building_manager_on_remote_spawn(pkt);
+            }
+        }
+        break;
+    }
+
+    case PacketType::BUILDING_DESPAWN_REMOTE: {
+        if (!host_sync_is_host()) {
+            BuildingDespawnRemote pkt;
+            if (unpack(data, length, pkt)) {
+                building_manager_on_remote_despawn(pkt.building_id);
+            }
+        }
+        break;
+    }
+
     case PacketType::COMBAT_ATTACK: {
         if (host_sync_is_host()) {
             CombatAttack pkt;
@@ -303,6 +338,8 @@ void player_sync_init() {
     s_send_timer = 0.0f;
     client_set_packet_callback(on_packet_received);
     host_sync_init();
+    building_sync_init();
+    building_manager_init();
     admin_panel_init();
     s_initialized = true;
 }
@@ -360,6 +397,7 @@ void player_sync_tick(float dt) {
         s_auto_reconnect = true;
         KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
         npc_manager_show_local_npcs();
+        building_manager_show_local_buildings();
         ui_on_disconnect();
     }
 
@@ -376,7 +414,7 @@ void player_sync_tick(float dt) {
                 req.name[MAX_NAME_LENGTH - 1] = '\0';
                 std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
                 req.model[MAX_MODEL_LENGTH - 1] = '\0';
-                req.is_host = 1;
+                req.is_host = s_requested_host ? 1 : 0;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
                 s_auto_reconnect = false;
@@ -392,7 +430,15 @@ void player_sync_tick(float dt) {
     npc_manager_update(dt);
 
     // Host: scan and send NPC state to server
-    host_sync_tick(dt);
+    // (disabled — joiner should only see remote player avatars, not host's NPCs)
+    // host_sync_tick(dt);
+    (void)dt;
+
+    // Host: scan and send building spawn/despawn
+    building_sync_tick(dt);
+
+    // Joiner: continuously wipe locally-streamed buildings/items
+    building_manager_wipe_tick(dt);
 
     // Joiner: periodically re-send combat stats (handles timing + leveling)
     if (!host_sync_is_host()) {
