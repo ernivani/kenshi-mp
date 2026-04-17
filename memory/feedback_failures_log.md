@@ -16,6 +16,19 @@ KenshiLib is undocumented. Every crash costs 10+ minutes of game restart + hook 
 
 ## Entries
 
+### 2026-04-17 — `ou->destroy()` on bulk world buildings crashes the joiner
+**Symptom:** Joiner crashes inside `building_manager_hide_local_buildings()` immediately after `Hidden N local NPCs` log line. Crash dump: `crashDump1.0.65_x64.dmp` ~950KB.
+
+**Cause:** Calling `ou->destroy(obj, false, "KenshiMP")` on every BUILDING/ITEM returned by `getObjectsWithinSphere` (~500+ objects) breaks the game's internal world state — many buildings belong to towns / squad ownerships and destroying them mid-iteration corrupts pointers.
+
+**DO NOT:** loop over `getObjectsWithinSphere(BUILDING, ...)` results and call `ou->destroy()` to wipe the world. Same for `dynamicDestroyBuilding`.
+
+**USE INSTEAD:** `obj->setVisible(false)` (RootObject pure virtual at vtable offset 0x100) — does not crash. Limitation: setVisible only hides the main mesh; LOD imposters / terrain-baked decoration stay visible. For full invisibility we'd need to also disable Ogre scene-node rendering or teleport the buildings (untested).
+
+**How to apply:** Joiner-side wipe must use setVisible — NEVER destroy. If setVisible isn't enough visually, investigate teleporting via `Building::setStartPosition` / `setEndPosition` (virtuals at vtable offset 0xA0/0xA8), but probe one building at a time first.
+
+---
+
 ### 2026-04-17 — RE_Kenshi loose package installer rejects Steam 1.0.68
 **Symptom:** `RE_Kenshi_v0.3.1_loose.zip` → `RE_Kenshi_installer.exe` shows "Hash 8a03c256f0da1555d9cceb939b41530a does not match. This mod is only compatible with Kenshi (Steam) and (GOG)" and the Next button stays disabled, even though that hash IS Steam 1.0.68 per the loose package's own `config.json`.
 

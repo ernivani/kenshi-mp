@@ -71,6 +71,7 @@ extern void building_manager_on_remote_spawn(const BuildingSpawnRemote& pkt);
 extern void building_manager_on_remote_despawn(uint32_t building_id);
 extern void building_manager_hide_local_buildings();
 extern void building_manager_show_local_buildings();
+extern void building_manager_wipe_tick(float dt);
 
 extern void admin_panel_init();
 extern void admin_panel_shutdown();
@@ -364,10 +365,15 @@ void player_sync_tick(float dt) {
     npc_manager_update(dt);
 
     // Host: scan and send NPC state to server
-    host_sync_tick(dt);
+    // (disabled — joiner should only see remote player avatars, not host's NPCs)
+    // host_sync_tick(dt);
+    (void)dt;
 
     // Host: scan and send building spawn/despawn
     building_sync_tick(dt);
+
+    // Joiner: continuously wipe locally-streamed buildings/items
+    building_manager_wipe_tick(dt);
 
     // Send local player state at tick rate
     s_send_timer += dt;

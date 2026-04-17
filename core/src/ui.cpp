@@ -413,7 +413,11 @@ static void stop_server() {
 }
 
 static void do_connect(bool as_host) {
-    if (client_is_connected()) return;
+    KMP_LOG(std::string("[KenshiMP] do_connect: as_host=") + (as_host ? "true (HOST button)" : "false (JOIN button)"));
+    if (client_is_connected()) {
+        KMP_LOG("[KenshiMP] do_connect: already connected, ignoring click");
+        return;
+    }
     if (!s_host_input || !s_port_input) return;
 
     std::string host = s_host_input->getCaption();
@@ -423,12 +427,22 @@ static void do_connect(bool as_host) {
     // If hosting, launch the server first
     if (as_host) {
         launch_server(port);
-        Sleep(500);  // give server time to start
+        Sleep(1500);  // give server time to bind ENet socket
     }
 
     player_sync_set_requested_host(as_host);
 
-    if (client_connect(host.c_str(), port)) {
+    // Retry connect a few times — server may still be binding
+    bool connected = false;
+    int max_attempts = as_host ? 5 : 1;
+    for (int attempt = 1; attempt <= max_attempts; ++attempt) {
+        if (client_connect(host.c_str(), port)) { connected = true; break; }
+        KMP_LOG(std::string("[KenshiMP] client_connect attempt ")
+            + (char)('0' + attempt) + "/" + (char)('0' + max_attempts) + " failed");
+        if (attempt < max_attempts) Sleep(1000);
+    }
+
+    if (connected) {
         ConnectRequest req;
         std::strncpy(req.name, as_host ? "Host" : "Joiner", MAX_NAME_LENGTH - 1);
         req.name[MAX_NAME_LENGTH - 1] = '\0';
@@ -437,8 +451,11 @@ static void do_connect(bool as_host) {
         req.is_host = as_host ? 1 : 0;
         std::vector<uint8_t> buf = pack(req);
         client_send_reliable(buf.data(), buf.size());
+        KMP_LOG(std::string("[KenshiMP] Sent ConnectRequest name=") + req.name + " is_host=" + (req.is_host ? "1" : "0"));
 
         update_status_text();
+    } else {
+        KMP_LOG("[KenshiMP] client_connect FAILED after all attempts");
     }
 }
 
