@@ -3,10 +3,12 @@
 
 #include <map>
 #include <set>
+#include <vector>
 #include <string>
 #include <sstream>
 #include <cstring>
 
+#include <kenshi/Enums.h>
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
 #include <kenshi/GameData.h>
@@ -14,6 +16,8 @@
 #include <kenshi/Building.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/RootObjectBase.h>
+#include <kenshi/PlayerInterface.h>
+#include <kenshi/Character.h>
 #include <kenshi/Faction.h>
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
@@ -27,6 +31,7 @@ namespace kmp {
 
 static std::map<uint32_t, Building*> s_remote_buildings;   // building_id → puppet
 static std::set<uint64_t>             s_remote_keys;       // Building* keys (for dedup with host scan)
+static std::vector<Building*>         s_hidden_locals;     // local buildings hidden on connect
 
 static std::string itos_bm(uint32_t v) {
     std::ostringstream ss; ss << v; return ss.str();
@@ -42,11 +47,56 @@ bool building_manager_is_remote(Building* b) {
 void building_manager_init() {
     s_remote_buildings.clear();
     s_remote_keys.clear();
+    s_hidden_locals.clear();
 }
 
 void building_manager_shutdown() {
     s_remote_buildings.clear();
     s_remote_keys.clear();
+    s_hidden_locals.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Hide all locally-existing buildings on join — joiner only sees host's world.
+// Symmetric to npc_manager_hide_local_npcs(). Reversible via show().
+// ---------------------------------------------------------------------------
+void building_manager_hide_local_buildings() {
+    if (!ou) return;
+    if (!ou->player) return;
+
+    const lektor<Character*>& players = ou->player->getAllPlayerCharacters();
+    if (players.count == 0) return;
+    Character* anchor = players.stuff[0];
+    if (!anchor) return;
+    Ogre::Vector3 center = anchor->getPosition();
+
+    lektor<RootObject*> results;
+    ou->getObjectsWithinSphere(results, center, 50000.0f, BUILDING, 9999, NULL);
+
+    int count = 0;
+    for (uint32_t i = 0; i < results.count; ++i) {
+        Building* b = dynamic_cast<Building*>(results.stuff[i]);
+        if (!b) continue;
+        // Skip any building we already track as a remote puppet
+        if (s_remote_keys.find((uint64_t)(uintptr_t)b) != s_remote_keys.end()) continue;
+        b->setVisible(false);
+        s_hidden_locals.push_back(b);
+        count++;
+    }
+    KMP_LOG("[KenshiMP] Hidden " + itos_bm((uint32_t)count) + " local buildings");
+}
+
+void building_manager_show_local_buildings() {
+    int count = 0;
+    for (size_t i = 0; i < s_hidden_locals.size(); ++i) {
+        Building* b = s_hidden_locals[i];
+        if (b) {
+            b->setVisible(true);
+            count++;
+        }
+    }
+    s_hidden_locals.clear();
+    KMP_LOG("[KenshiMP] Restored " + itos_bm((uint32_t)count) + " local buildings");
 }
 
 uint32_t building_manager_get_remote_count() {
