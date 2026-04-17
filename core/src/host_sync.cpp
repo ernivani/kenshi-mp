@@ -12,6 +12,7 @@
 
 #include <kenshi/Damages.h>
 #include <kenshi/Enums.h>
+#include <kenshi/GameData.h>
 #include <kenshi/Globals.h>
 #include <kenshi/GameWorld.h>
 #include <kenshi/Character.h>
