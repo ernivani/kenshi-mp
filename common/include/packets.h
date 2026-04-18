@@ -79,12 +79,23 @@ struct ConnectReject {
     }
 };
 
+// Posture flags packed into PlayerState::animation_id (Phase A).
+// Only the low 8 bits are used; upper bits reserved for future anim-id use.
+static const uint32_t POSTURE_DOWN        = 1u << 0;
+static const uint32_t POSTURE_UNCONSCIOUS = 1u << 1;
+static const uint32_t POSTURE_RAGDOLL     = 1u << 2;
+static const uint32_t POSTURE_DEAD        = 1u << 3;
+static const uint32_t POSTURE_CHAINED     = 1u << 4;
+// Any flag in this mask means the avatar should be ragdolled on receivers.
+static const uint32_t POSTURE_RAGDOLL_MASK =
+    POSTURE_DOWN | POSTURE_UNCONSCIOUS | POSTURE_RAGDOLL | POSTURE_DEAD;
+
 struct PlayerState {
     PacketHeader header;
     uint32_t     player_id;
     float        x, y, z;          // world position
     float        yaw;              // rotation around Y axis (radians)
-    uint32_t     animation_id;     // current animation state hash
+    uint32_t     animation_id;     // low 8 bits: posture flags (POSTURE_*)
     float        speed;            // movement speed (for animation blending)
 
     PlayerState() {
