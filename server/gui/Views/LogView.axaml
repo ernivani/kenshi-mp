@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:KenshiMP.Server.ViewModels"
+             x:Class="KenshiMP.Server.Views.LogView"
+             x:DataType="vm:LogViewModel">
+    <Grid RowDefinitions="Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Log"
+                   FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+            <CheckBox Content="Debug" IsChecked="{Binding ShowDebug}"/>
+            <CheckBox Content="Info"  IsChecked="{Binding ShowInfo}"/>
+            <CheckBox Content="Warn"  IsChecked="{Binding ShowWarn}"/>
+            <CheckBox Content="Error" IsChecked="{Binding ShowError}"/>
+            <CheckBox Content="Auto-scroll" IsChecked="{Binding AutoScroll}"/>
+            <TextBox Text="{Binding Filter, Mode=TwoWay}"
+                     Watermark="Filter substring" Width="240"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="#101216" CornerRadius="6" Padding="8">
+            <ScrollViewer>
+                <ItemsControl ItemsSource="{Binding Entries}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LogEntry">
+                            <TextBlock FontFamily="Consolas" FontSize="12">
+                                <Run Text="["/>
+                                <Run Text="{Binding LevelTag}" Foreground="{Binding Color}"/>
+                                <Run Text="] "/>
+                                <Run Text="{Binding Time}" Foreground="#777"/>
+                                <Run Text=" "/>
+                                <Run Text="{Binding Text}" Foreground="{Binding Color}"/>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

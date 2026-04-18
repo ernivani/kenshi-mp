@@ -4,12 +4,18 @@
 // clients or broadcast to all.
 
 #include <cstdint>
+#include <atomic>
 #include <enet/enet.h>
 #include "protocol.h"
 
 namespace kmp {
 
 static ENetHost* s_relay_host = nullptr;
+
+static std::atomic<uint64_t> s_packets_out{0};
+static std::atomic<uint64_t> s_bytes_out{0};
+static std::atomic<uint64_t> s_packets_in{0};
+static std::atomic<uint64_t> s_bytes_in{0};
 
 void relay_init(ENetHost* host) {
     s_relay_host = host;
@@ -24,6 +30,9 @@ void relay_send_to(ENetPeer* peer, const uint8_t* data, size_t length, bool reli
 
     ENetPacket* packet = enet_packet_create(data, length, flags);
     enet_peer_send(peer, channel, packet);
+
+    s_packets_out.fetch_add(1, std::memory_order_relaxed);
+    s_bytes_out.fetch_add(length, std::memory_order_relaxed);
 }
 
 // Broadcast a packet to all connected peers, optionally excluding one
@@ -40,7 +49,20 @@ void relay_broadcast(ENetPeer* exclude, const uint8_t* data, size_t length, bool
 
         ENetPacket* packet = enet_packet_create(data, length, flags);
         enet_peer_send(peer, channel, packet);
+
+        s_packets_out.fetch_add(1, std::memory_order_relaxed);
+        s_bytes_out.fetch_add(length, std::memory_order_relaxed);
     }
 }
+
+void relay_record_incoming(size_t length) {
+    s_packets_in.fetch_add(1, std::memory_order_relaxed);
+    s_bytes_in.fetch_add(length, std::memory_order_relaxed);
+}
+
+uint64_t relay_stat_packets_out() { return s_packets_out.load(std::memory_order_relaxed); }
+uint64_t relay_stat_bytes_out()   { return s_bytes_out.load(std::memory_order_relaxed); }
+uint64_t relay_stat_packets_in()  { return s_packets_in.load(std::memory_order_relaxed); }
+uint64_t relay_stat_bytes_in()    { return s_bytes_in.load(std::memory_order_relaxed); }
 
 } // namespace kmp

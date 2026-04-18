@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <sstream>
+#include <cmath>
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -41,6 +42,15 @@ extern void client_send_reliable(const uint8_t* data, size_t length);
 extern bool client_is_connected();
 extern bool host_sync_is_host();
 extern Character* game_get_player_character();
+
+// Strip AI goals so the avatar doesn't fight our position updates.
+// createRandomCharacter returns a fully-AI-driven NPC — left alone, it
+// pathfinds, wanders, and engages, causing drift from the authoritative
+// remote position and visible snaps when we correct.
+static void neutralize_remote_avatar(Character* ch) {
+    if (!ch) return;
+    ch->clearAllAIGoals();
+}
 
 // Get faction for synced NPCs
 // createRandomCharacter needs a faction with character templates
@@ -143,6 +153,7 @@ struct RemotePlayer {
     Snapshot next;
     double  interp_t;
     float   last_health;
+    uint32_t applied_posture;  // last posture bitfield we applied to rp.npc
 };
 
 static std::map<uint32_t, RemotePlayer> s_remote_players;
@@ -197,6 +208,16 @@ Character* npc_manager_get_player_avatar(uint32_t player_id) {
     std::map<uint32_t, RemotePlayer>::iterator it = s_remote_players.find(player_id);
     if (it != s_remote_players.end()) return it->second.npc;
     return NULL;
+}
+
+// Populate `out` with ids of all tracked remote players. Used by chat /players.
+void npc_manager_list_remote_players(std::vector<uint32_t>& out) {
+    out.clear();
+    out.reserve(s_remote_players.size());
+    std::map<uint32_t, RemotePlayer>::iterator it;
+    for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
+        out.push_back(it->first);
+    }
 }
 
 bool npc_manager_is_player_npc(Character* ch) {
@@ -297,6 +318,7 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
+            neutralize_remote_avatar(npc);
             rp.npc = npc;
             KMP_LOG(
                 "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
@@ -332,6 +354,7 @@ void npc_manager_on_state(const PlayerState& pkt) {
                 );
                 Character* npc = dynamic_cast<Character*>(obj);
                 if (npc) {
+                    neutralize_remote_avatar(npc);
                     rp.npc = npc;
                     KMP_LOG(
                         "[KenshiMP] Late-spawned NPC for player " + itos(pkt.player_id));
@@ -413,6 +436,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
+            neutralize_remote_avatar(npc);
             rnpc.npc = npc;
             KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
@@ -563,20 +587,59 @@ void npc_manager_update(float dt) {
 
         if (rp.npc) {
             Ogre::Vector3 target(ix, iy, iz);
-            Ogre::Vector3 current = rp.npc->getPosition();
-            float dx = target.x - current.x;
-            float dz = target.z - current.z;
-            float dist_sq = dx*dx + dz*dz;
+            Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
 
-            if (dist_sq > 50.0f * 50.0f) {
-                Ogre::Quaternion rot(Ogre::Radian(iyaw), Ogre::Vector3::UNIT_Y);
-                rp.npc->teleport(target, rot);
-            } else {
-                CharMovement* movement = rp.npc->getMovement();
-                if (movement) {
-                    movement->setDestination(target, HIGH_PRIORITY, false);
+            // Velocity between the two snapshots we're interpolating over.
+            // Snapshots arrive at TICK_RATE_HZ, so seconds-per-snapshot = 1/rate.
+            float snap_dt = 1.0f / static_cast<float>(TICK_RATE_HZ);
+            float vx = (rp.next.x - rp.prev.x) / snap_dt;
+            float vz = (rp.next.z - rp.prev.z) / snap_dt;
+            float speed_sq = vx*vx + vz*vz;
+
+            CharMovement* mov = rp.npc->getMovement();
+            if (mov) {
+                if (speed_sq > 0.25f) {  // ~0.5 m/s threshold
+                    // Project a destination ahead of the current target so the
+                    // locomotion system plays a walk/run animation. We still
+                    // teleport to the authoritative position every frame — the
+                    // destination just drives animation, not position.
+                    float inv_len = 1.0f / sqrtf(speed_sq);
+                    Ogre::Vector3 ahead(ix + vx * inv_len * 5.0f,
+                                        iy,
+                                        iz + vz * inv_len * 5.0f);
+                    MoveSpeed sp = (speed_sq > 36.0f)  ? RUN
+                                 : (speed_sq > 9.0f)   ? JOG
+                                                       : WALK;
+                    mov->setDesiredSpeed(sp);
+                    mov->setDestination(ahead, HIGH_PRIORITY, false);
+                } else {
+                    // Idle — cancel any pending destination so legs don't walk.
+                    mov->setDestination(target, HIGH_PRIORITY, false);
                 }
             }
+
+            // Set authoritative logical position directly on the movement
+            // component. Character::teleport() clobbers destination/speed
+            // (breaks animation). teleportVisuallyOnly() only moves the
+            // visual, so the engine drags it back toward the unchanged
+            // logical position next frame. Going through CharMovement
+            // updates the logical position while leaving the destination
+            // and desired-speed we just set intact.
+            if (mov) {
+                mov->_setPositionDirectionAndTeleport(target, rot);
+            } else {
+                rp.npc->teleport(target, rot);
+            }
+
+            // Phase A posture sync: drive ragdoll on state transitions.
+            // animation_id carries posture bitflags (see packets.h).
+            uint32_t posture = rp.next.animation_id;
+            bool want_ragdoll = (posture & POSTURE_RAGDOLL_MASK) != 0;
+            bool had_ragdoll  = (rp.applied_posture & POSTURE_RAGDOLL_MASK) != 0;
+            if (want_ragdoll != had_ragdoll) {
+                rp.npc->ragdollMode(want_ragdoll, RagdollPart::WHOLE);
+            }
+            rp.applied_posture = posture;
         }
     }
 

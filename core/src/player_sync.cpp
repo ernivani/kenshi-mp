@@ -35,6 +35,8 @@ static std::string itos(uint32_t val) {
 extern void client_poll();
 extern bool client_connect(const char* host, uint16_t port);
 extern void client_disconnect();
+extern uint32_t client_get_last_disconnect_reason();
+extern void     client_clear_last_disconnect_reason();
 extern void client_send_unreliable(const uint8_t* data, size_t length);
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern bool client_is_connected();
@@ -128,7 +130,15 @@ static bool read_local_player_state(PlayerState& out) {
     }
 
     out.speed = ch->getMovementSpeed();
-    out.animation_id = 0;
+
+    uint32_t posture = 0;
+    if (ch->isDown())         posture |= POSTURE_DOWN;
+    if (ch->isUnconcious())   posture |= POSTURE_UNCONSCIOUS;
+    if (ch->isRagdoll())      posture |= POSTURE_RAGDOLL;
+    if (ch->isDead())         posture |= POSTURE_DEAD;
+    if (ch->isChainedMode())  posture |= POSTURE_CHAINED;
+    out.animation_id = posture;
+
     out.player_id = client_get_local_id();
 
     return true;
@@ -276,6 +286,55 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    // --- Server-authored spawns: processed on BOTH host and joiner. ---
+    // Wire layout identical to the NPC_/BUILDING_ variants — just a different
+    // type byte so core can intentionally bypass the "host is authority" guard.
+    case PacketType::SERVER_SPAWN_NPC: {
+        NPCSpawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_remote_spawn(pkt);
+        }
+        break;
+    }
+    case PacketType::SERVER_DESPAWN_NPC: {
+        NPCDespawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_remote_despawn(pkt.npc_id);
+        }
+        break;
+    }
+    case PacketType::SERVER_SPAWN_BUILDING: {
+        BuildingSpawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            building_manager_on_remote_spawn(pkt);
+        }
+        break;
+    }
+    case PacketType::SERVER_DESPAWN_BUILDING: {
+        BuildingDespawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            building_manager_on_remote_despawn(pkt.building_id);
+        }
+        break;
+    }
+
+    // Host-initiated teleport targeting this client. Character::teleport
+    // takes an ABSOLUTE position (same call convention npc_manager uses).
+    case PacketType::FORCE_TELEPORT: {
+        ForceTeleport pkt;
+        if (unpack(data, length, pkt)) {
+            if (pkt.target_player_id == client_get_local_id()) {
+                Character* me = game_get_player_character();
+                if (me) {
+                    Ogre::Vector3 dest(pkt.x, pkt.y, pkt.z);
+                    me->teleport(dest);
+                    KMP_LOG("[KenshiMP] Force-teleported by host");
+                }
+            }
+        }
+        break;
+    }
+
     case PacketType::COMBAT_ATTACK: {
         if (host_sync_is_host()) {
             CombatAttack pkt;
@@ -365,25 +424,7 @@ void player_sync_tick(float dt) {
     admin_panel_check_hotkey();
     admin_panel_update(dt);
 
-    // F12: attack nearest synced NPC (joiner only)
-    static bool s_f12_was_down = false;
-    bool f12_down = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
-    if (f12_down && !s_f12_was_down && client_is_connected() && !host_sync_is_host()) {
-        Character* player = game_get_player_character();
-        if (player) {
-            Ogre::Vector3 pos = player->getPosition();
-            uint32_t target_id = npc_manager_get_nearest_remote_npc(pos.x, pos.y, pos.z, 50.0f);
-            if (target_id > 0) {
-                CombatTarget tgt;
-                tgt.player_id = client_get_local_id();
-                tgt.target_npc_id = target_id;
-                std::vector<uint8_t> buf = pack(tgt);
-                client_send_reliable(buf.data(), buf.size());
-                KMP_LOG("[KenshiMP] F12: targeting NPC " + itos(target_id));
-            }
-        }
-    }
-    s_f12_was_down = f12_down;
+    // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)
 
     // Poll network if connected
     if (client_is_connected()) {
@@ -394,8 +435,17 @@ void player_sync_tick(float dt) {
     // Detect disconnection
     if (s_was_connected && !client_is_connected()) {
         s_was_connected = false;
-        s_auto_reconnect = true;
-        KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
+        uint32_t reason = client_get_last_disconnect_reason();
+        client_clear_last_disconnect_reason();
+        if (reason == 1) {
+            // Server-initiated kick. Don't auto-reconnect — the user was
+            // explicitly asked to leave.
+            s_auto_reconnect = false;
+            KMP_LOG("[KenshiMP] Kicked by server");
+        } else {
+            s_auto_reconnect = true;
+            KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
+        }
         npc_manager_show_local_npcs();
         building_manager_show_local_buildings();
         ui_on_disconnect();
