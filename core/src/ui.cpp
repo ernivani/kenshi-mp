@@ -16,6 +16,9 @@
 
 #include <MyGUI.h>
 #include <OgreLogManager.h>
+#include <OgreVector3.h>
+#include <OgreQuaternion.h>
+#include <kenshi/Character.h>
 #include "kmp_log.h"
 
 #include "packets.h"
@@ -39,6 +42,9 @@ extern uint32_t client_get_local_id();
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern void player_sync_set_requested_host(bool val);
 extern bool host_sync_is_host();
+extern Character* game_get_player_character();
+extern Character* npc_manager_get_player_avatar(uint32_t player_id);
+extern void       npc_manager_list_remote_players(std::vector<uint32_t>& out);
 
 // ---------------------------------------------------------------------------
 // State
@@ -578,8 +584,12 @@ static bool handle_chat_command(const std::string& text) {
         arg = text.substr(sp + 1);
     }
 
+    const bool is_host = host_sync_is_host();
+
     if (cmd == "help") {
-        append_system_message("Commands: /help, /clear, /who, /close");
+        append_system_message("Common: /help /clear /who /close /pos");
+        if (is_host)
+            append_system_message("Host:   /players /tp <id> /tphere <id>");
         return true;
     }
     if (cmd == "clear") {
@@ -594,6 +604,70 @@ static bool handle_chat_command(const std::string& text) {
     if (cmd == "who") {
         append_system_message("Your player id: " + itos(client_get_local_id()));
         return true;
+    }
+    if (cmd == "pos") {
+        Character* ch = game_get_player_character();
+        if (ch) {
+            Ogre::Vector3 p = ch->getPosition();
+            std::ostringstream ss;
+            ss.precision(1);
+            ss << std::fixed << "Your position: ("
+               << p.x << ", " << p.y << ", " << p.z << ")";
+            append_system_message(ss.str());
+        } else {
+            append_system_message("No local character available");
+        }
+        return true;
+    }
+
+    // ---- host-only commands ----
+    if (!is_host) {
+        if (cmd == "players" || cmd == "tp" || cmd == "tphere") {
+            append_system_message("/" + cmd + " is host-only");
+            return true;
+        }
+    } else {
+        if (cmd == "players") {
+            std::vector<uint32_t> ids;
+            npc_manager_list_remote_players(ids);
+            if (ids.empty()) {
+                append_system_message("No remote players tracked");
+                return true;
+            }
+            Character* me = game_get_player_character();
+            Ogre::Vector3 my = me ? me->getPosition() : Ogre::Vector3::ZERO;
+            for (size_t i = 0; i < ids.size(); ++i) {
+                Character* ch = npc_manager_get_player_avatar(ids[i]);
+                if (!ch) continue;
+                Ogre::Vector3 p = ch->getPosition();
+                float d = my.distance(p);
+                std::ostringstream ss;
+                ss.precision(0);
+                ss << std::fixed << "Player " << ids[i] << " at ("
+                   << p.x << ", " << p.y << ", " << p.z << ")  dist=" << d;
+                append_system_message(ss.str());
+            }
+            return true;
+        }
+        if (cmd == "tp") {
+            uint32_t target = (uint32_t)atoi(arg.c_str());
+            Character* ch = npc_manager_get_player_avatar(target);
+            Character* me = game_get_player_character();
+            if (!ch)      { append_system_message("No such player: " + arg); return true; }
+            if (!me)      { append_system_message("No local character"); return true; }
+            Ogre::Vector3 target_pos = ch->getPosition();
+            Ogre::Vector3 my = me->getPosition();
+            Ogre::Vector3 delta = target_pos - my;
+            me->teleport(delta);
+            append_system_message("Teleported to player " + itos(target));
+            return true;
+        }
+        if (cmd == "tphere") {
+            // Bring a player TO the host — needs a server-side protocol we
+            // haven't added yet. Stub with a clear message.
+            append_system_message("/tphere is not yet implemented (requires server protocol)");
+            return true;
+        }
     }
 
     append_system_message("Unknown command: /" + cmd + "  (try /help)");

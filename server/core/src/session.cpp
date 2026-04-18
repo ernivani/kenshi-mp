@@ -3,6 +3,7 @@
 // Tracks connected players, assigns IDs, handles connect/disconnect/timeout.
 
 #include <map>
+#include <set>
 #include <deque>
 #include <chrono>
 #include <cstring>
@@ -58,6 +59,9 @@ static constexpr size_t POSTURE_RING_MAX  = 512;
 static std::deque<ChatLogEntry>      s_chat_log;
 static std::deque<PostureTransition> s_posture_log;
 
+// Player ids whose next leave announce should be suppressed (set by admin_kick).
+static std::set<uint32_t> s_suppress_leave;
+
 static uint64_t now_wall_ms() {
     using namespace std::chrono;
     return static_cast<uint64_t>(
@@ -104,7 +108,9 @@ void session_on_disconnect(ENetPeer* peer) {
     auto buf = pack(pkt);
     relay_broadcast(peer, buf.data(), buf.size(), true);
 
-    {
+    // admin_kick handles its own announce; skip the generic "left" line.
+    bool suppress = s_suppress_leave.erase(id) > 0;
+    if (!suppress) {
         ChatMessage announce;
         announce.player_id = 0;
         std::string text = left_name + " left";
@@ -112,6 +118,7 @@ void session_on_disconnect(ENetPeer* peer) {
         auto abuf = pack(announce);
         relay_broadcast(peer, abuf.data(), abuf.size(), true);
         session_chat_push(0, "<server>", text);
+        events_emit_chat(0, "<server>", text);
     }
 
     world_state_remove_player(id);
@@ -228,6 +235,7 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
         auto abuf = pack(announce);
         relay_broadcast(nullptr, abuf.data(), abuf.size(), true);
         session_chat_push(0, "<server>", text);
+        events_emit_chat(0, "<server>", text);
     }
 }
 
@@ -487,6 +495,10 @@ bool session_get_player_snapshot(uint32_t player_id, PlayerInfo& out) {
     out.ping_ms = 0;
     out.idle_ms = 0;
     return true;
+}
+
+void session_suppress_leave_announce(uint32_t player_id) {
+    s_suppress_leave.insert(player_id);
 }
 
 void session_chat_push(uint32_t player_id, const std::string& author, const std::string& text) {

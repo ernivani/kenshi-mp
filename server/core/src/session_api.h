@@ -38,6 +38,10 @@ struct ChatLogEntry {
 void         session_chat_push(uint32_t player_id, const std::string& author, const std::string& text);
 void         session_chat_snapshot(std::vector<ChatLogEntry>& out);
 
+// Suppress the next "<name> left" announce for this player id. Used by
+// admin_kick so it can broadcast its own "<name> was kicked" line instead.
+void         session_suppress_leave_announce(uint32_t player_id);
+
 // Posture transition log (for GUI Posture pane).
 struct PostureTransition {
     uint32_t    player_id;
