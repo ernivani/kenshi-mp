@@ -210,6 +210,16 @@ Character* npc_manager_get_player_avatar(uint32_t player_id) {
     return NULL;
 }
 
+// Populate `out` with ids of all tracked remote players. Used by chat /players.
+void npc_manager_list_remote_players(std::vector<uint32_t>& out) {
+    out.clear();
+    out.reserve(s_remote_players.size());
+    std::map<uint32_t, RemotePlayer>::iterator it;
+    for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {
+        out.push_back(it->first);
+    }
+}
+
 bool npc_manager_is_player_npc(Character* ch) {
     std::map<uint32_t, RemotePlayer>::iterator it;
     for (it = s_remote_players.begin(); it != s_remote_players.end(); ++it) {

@@ -43,6 +43,11 @@ void admin_kick(uint32_t player_id, const char* reason) {
         spdlog::warn("Kick: player {} not found", player_id);
         return;
     }
+    PlayerInfo info;
+    std::string name = session_get_player_snapshot(player_id, info)
+        ? info.name
+        : ("Player " + std::to_string(player_id));
+
     spdlog::info("Kicking player {} (reason: {})", player_id, reason ? reason : "");
     // Send a server chat as a visible reason, best-effort.
     if (reason && reason[0]) {
@@ -54,6 +59,24 @@ void admin_kick(uint32_t player_id, const char* reason) {
         enet_peer_send(peer, CHANNEL_RELIABLE, pkt);
         enet_host_flush(peer->host);
     }
+
+    // Broadcast a public kick line to everyone else and mirror to server log.
+    {
+        std::string text = name + " was kicked";
+        if (reason && reason[0]) text += std::string(": ") + reason;
+        ChatMessage announce;
+        announce.player_id = 0;
+        safe_strcpy(announce.message, text.c_str());
+        auto abuf = pack(announce);
+        relay_broadcast(peer, abuf.data(), abuf.size(), true);
+        session_chat_push(0, "<server>", text);
+        events_emit_chat(0, "<server>", text);
+    }
+
+    // Suppress the duplicate "<name> left" announce that session_on_disconnect
+    // would otherwise broadcast for this kick.
+    session_suppress_leave_announce(player_id);
+
     // Non-zero disconnect code tells the client this was an admin-initiated
     // kick (vs. a network drop) so it suppresses auto-reconnect.
     enet_peer_disconnect(peer, /*data=*/1);
