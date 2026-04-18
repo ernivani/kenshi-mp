@@ -165,6 +165,10 @@ static std::map<uint32_t, RemoteNPC> s_remote_npcs;
 static bool  s_npc_wipe_active = false;
 static float s_npc_wipe_timer  = 0.0f;
 static const float NPC_WIPE_INTERVAL = 0.1f;  // 100ms between destroys
+// Characters we've already told the game to destroy. ou->destroy() is deferred,
+// so the same pointer can reappear in getCharacterUpdateList() next tick —
+// destroying it again is a use-after-free.
+static std::set<Character*> s_npc_destroyed;
 
 // ---------------------------------------------------------------------------
 // Init / Shutdown
@@ -217,6 +221,7 @@ void npc_manager_hide_local_npcs() {
 
 void npc_manager_show_local_npcs() {
     s_npc_wipe_active = false;
+    s_npc_destroyed.clear();
     KMP_LOG("[KenshiMP] NPC wipe deactivated (destroyed NPCs NOT restored — reload save)");
 }
 
@@ -517,6 +522,7 @@ void npc_manager_update(float dt) {
                 if (!ch) continue;
                 if (ch->isPlayerCharacter()) continue;
                 if (our_npcs.count(ch)) continue;
+                if (s_npc_destroyed.count(ch)) continue;
 
                 if (player_ch) {
                     float d2 = center.squaredDistance(ch->getPosition());
@@ -533,6 +539,7 @@ void npc_manager_update(float dt) {
             if (closest) {
                 KMP_LOG("[KenshiMP] DESTROY NPC ptr="
                     + itos(static_cast<uint32_t>((uint64_t)(uintptr_t)closest & 0xFFFFFFFF)));
+                s_npc_destroyed.insert(closest);
                 ou->destroy(closest, false, "KenshiMP");
                 KMP_LOG("[KenshiMP] DESTROY NPC ok");
             }
