@@ -21,6 +21,7 @@
 #include "packets.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "client_identity.h"
 
 namespace kmp {
 
@@ -52,6 +53,7 @@ static MyGUI::EditBox*  s_port_input     = NULL;
 static MyGUI::Button*   s_host_btn       = NULL;
 static MyGUI::Button*   s_join_btn       = NULL;
 static MyGUI::Button*   s_disconnect_btn = NULL;
+static MyGUI::Button*   s_chat_toggle_btn = NULL;
 
 static MyGUI::Window*   s_chat_window    = NULL;
 static MyGUI::EditBox*  s_chat_display   = NULL;
@@ -75,7 +77,10 @@ static void on_join_clicked(MyGUI::Widget* sender);
 static void on_disconnect_clicked(MyGUI::Widget* sender);
 static void on_chat_send_clicked(MyGUI::Widget* sender);
 static void on_chat_key_press(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::Char ch);
+static void on_chat_window_button(MyGUI::Window* sender, const std::string& name);
 static void refresh_chat_display();
+static void append_system_message(const std::string& text);
+static bool handle_chat_command(const std::string& text);
 static void update_status_text();
 
 // ---------------------------------------------------------------------------
@@ -98,7 +103,7 @@ void ui_init() {
 
     // --- Connect dialog ---
     s_connect_window = gui->createWidget<MyGUI::Window>(
-        "Kenshi_GenericWindowSkin",
+        "Kenshi_WindowCX",   // draggable caption bar
         MyGUI::IntCoord(100, 100, 320, 240),
         MyGUI::Align::Default,
         "Overlapped",
@@ -186,51 +191,69 @@ void ui_init() {
     s_disconnect_btn->eventMouseButtonClick += MyGUI::newDelegate(on_disconnect_clicked);
 
     // --- Chat window ---
+    // Default position is higher on screen (was too low previously) and bigger
+    // so several chat lines fit without resizing.
     s_chat_window = gui->createWidget<MyGUI::Window>(
-        "Kenshi_GenericWindowSkin",
-        MyGUI::IntCoord(100, 320, 400, 250),
+        "Kenshi_WindowCX",   // real window skin with caption bar (so it's draggable)
+        MyGUI::IntCoord(40, 120, 460, 360),
         MyGUI::Align::Default,
         "Overlapped",
         "KMP_ChatWindow"
     );
     s_chat_window->setCaption("KenshiMP - Chat");
     s_chat_window->setVisible(false);
+    // Hook the caption X button. `name` is the button id; "close" is the
+    // default for the X button on Kenshi_WindowCX.
+    s_chat_window->eventWindowButtonPressed += MyGUI::newDelegate(on_chat_window_button);
 
-    // Chat display (read-only, multiline)
+    // Fetch the skin-defined client area once; everything below is positioned
+    // in client-relative coords already, so MyGUI handles caption offset.
+    const int pad   = 6;
+    const int input_h = 28;
+    const MyGUI::IntSize cs = s_chat_window->getClientCoord().size();
+
+    // Chat display — top area. HStretch + VStretch so it keeps filling the
+    // space above the input as the window resizes.
+    // Multi-line edit skin (same one Kenshi uses for NPC dialog / description
+    // boxes). Kenshi_EditBox by itself is a single-line skin and vertically
+    // centres its text, which is what made chat look "floating in the middle".
     s_chat_display = s_chat_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxEmptySkin",
-        MyGUI::IntCoord(5, 5, 380, 170),
+        "Kenshi_EditBoxStrechEmpty",
+        MyGUI::IntCoord(pad, pad,
+                        cs.width  - 2 * pad,
+                        cs.height - 3 * pad - input_h),
         MyGUI::Align::Stretch,
         "KMP_ChatDisplay"
     );
     s_chat_display->setEditReadOnly(true);
     s_chat_display->setEditMultiLine(true);
     s_chat_display->setEditWordWrap(true);
+    s_chat_display->setEditStatic(true);
     s_chat_display->setFontName(stdFont);
-    s_chat_display->setTextColour(textCol);
+    s_chat_display->setTextColour(textCol);   // dark text on the light editbox bg
+    // Anchor text to top-left (default EditBox alignment on some skins centres
+    // vertically, which makes the log look like it's floating in the middle).
+    s_chat_display->setTextAlign(MyGUI::Align::Left | MyGUI::Align::Top);
+    // Show a scrollbar when the log overflows; we scroll to the bottom on new
+    // messages in refresh_chat_display().
+    s_chat_display->setVisibleVScroll(true);
 
-    // Chat input
+    // Chat input — full-width, bottom-anchored. Enter submits; no Send button.
     s_chat_input = s_chat_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxEmptySkin",
-        MyGUI::IntCoord(5, 180, 310, 26),
-        MyGUI::Align::Default,
+        "Kenshi_EditBox",
+        MyGUI::IntCoord(pad, cs.height - pad - input_h,
+                        cs.width - 2 * pad, input_h),
+        MyGUI::Align::HStretch | MyGUI::Align::Bottom,
         "KMP_ChatInput"
     );
     s_chat_input->setFontName(stdFont);
     s_chat_input->setTextColour(textCol);
+    s_chat_input->setEditStatic(false);
+    s_chat_input->setEditReadOnly(false);
+    s_chat_input->setEditMultiLine(false);
+    s_chat_input->setNeedKeyFocus(true);
     s_chat_input->eventKeyButtonPressed += MyGUI::newDelegate(on_chat_key_press);
-
-    // Send button
-    s_chat_send_btn = s_chat_window->createWidget<MyGUI::Button>(
-        "Kenshi_Button1Skin",
-        MyGUI::IntCoord(320, 180, 70, 26),
-        MyGUI::Align::Default,
-        "KMP_ChatSendBtn"
-    );
-    s_chat_send_btn->setCaption("Send");
-    s_chat_send_btn->setFontName(btnFont);
-    s_chat_send_btn->setTextAlign(MyGUI::Align::Center);
-    s_chat_send_btn->eventMouseButtonClick += MyGUI::newDelegate(on_chat_send_clicked);
+    s_chat_send_btn = NULL;  // legacy, no longer created
 
     // --- Status text (top of screen) ---
     s_status_text = gui->createWidget<MyGUI::TextBox>(
@@ -240,7 +263,7 @@ void ui_init() {
         "Overlapped",
         "KMP_StatusText"
     );
-    s_status_text->setCaption("KenshiMP - Press F8 to open");
+    s_status_text->setCaption("KenshiMP - F8: connect  F10: chat");
     s_status_text->setFontName(stdFont);
     s_status_text->setTextColour(MyGUI::Colour(0.8f, 1.0f, 0.8f));
     s_status_text->setVisible(true);
@@ -281,16 +304,20 @@ void ui_shutdown() {
 void ui_toggle() {
     if (!s_ui_initialized) return;
 
+    // F8 toggles the connect dialog only. The chat window is persistent while
+    // connected (shown on accept, hidden on disconnect) so players can always
+    // see incoming messages and reach the input field.
     s_ui_visible = !s_ui_visible;
     if (s_connect_window) s_connect_window->setVisible(s_ui_visible);
-    if (s_chat_window && client_is_connected()) s_chat_window->setVisible(s_ui_visible);
 }
 
 // ---------------------------------------------------------------------------
 // Check for F8 key press — call this from player_sync_tick or game hook
 // ---------------------------------------------------------------------------
 void ui_check_hotkey() {
-    // F8: toggle UI visibility
+    // F8: toggle the connect dialog.
+    // Note: F8 is also Kenshi's screenshot key — move this to a free key
+    // (F6 / F1) if the screenshot conflict bites.
     static bool s_f8_was_down = false;
     bool f8_down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
     if (f8_down && !s_f8_was_down) {
@@ -298,37 +325,46 @@ void ui_check_hotkey() {
     }
     s_f8_was_down = f8_down;
 
+    // F10: toggle chat window. Kenshi doesn't bind F10, so it's safe for us.
+    // Use this to reopen the chat after closing it with the X button.
+    static bool s_f10_was_down = false;
+    bool f10_down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+    if (f10_down && !s_f10_was_down && s_chat_window && client_is_connected()) {
+        bool vis = s_chat_window->getVisible();
+        s_chat_window->setVisible(!vis);
+        if (!vis && s_chat_input)
+            MyGUI::InputManager::getInstance().setKeyFocusWidget(s_chat_input);
+    }
+    s_f10_was_down = f10_down;
 }
 
 // ---------------------------------------------------------------------------
 // Callbacks from player_sync
 // ---------------------------------------------------------------------------
 void ui_on_connect_accept(uint32_t player_id) {
-    ChatEntry entry;
-    entry.sender = "[KenshiMP]";
-    entry.message = "Connected! Your ID: " + itos(player_id);
-    s_chat_log.push_back(entry);
-    refresh_chat_display();
+    append_system_message("Connected. Your ID: " + itos(player_id)
+        + ".  Type /help for commands.");
     update_status_text();
 
-    // Show chat window
-    if (s_chat_window && s_ui_visible) {
+    // Show chat window whenever connected, regardless of the connect-dialog toggle.
+    if (s_chat_window) {
         s_chat_window->setVisible(true);
     }
 }
 
 void ui_on_disconnect() {
-    ChatEntry entry;
-    entry.sender = "[KenshiMP]";
-    entry.message = "Disconnected from server";
-    s_chat_log.push_back(entry);
-    refresh_chat_display();
+    append_system_message("Disconnected from server");
     update_status_text();
 }
 
 void ui_on_chat(const ChatMessage& pkt) {
     ChatEntry entry;
-    entry.sender = "Player " + itos(pkt.player_id);
+    if (pkt.player_id == 0) {
+        // player_id == 0 is the server sentinel (see session.cpp / admin_broadcast_chat).
+        entry.sender = "[Server]";
+    } else {
+        entry.sender = "Player " + itos(pkt.player_id);
+    }
     entry.message = pkt.message;
     s_chat_log.push_back(entry);
     refresh_chat_display();
@@ -445,11 +481,23 @@ static void do_connect(bool as_host) {
 
     if (connected) {
         ConnectRequest req;
-        std::strncpy(req.name, as_host ? "Host" : "Joiner", MAX_NAME_LENGTH - 1);
+        // Build a unique-per-install display name so the server + other clients
+        // can tell two joiners apart. "Host" stays explicit; joiners get a 6-hex
+        // suffix derived from their stable UUID (first chars of the UUID string,
+        // minus the dashes) so the same person always shows up as the same name.
+        const char* uuid = client_identity_get_uuid();
+        std::string suffix;
+        for (const char* c = uuid; *c && suffix.size() < 6; ++c) {
+            if (*c != '-') suffix += *c;
+        }
+        std::string display = as_host ? "Host" : ("Player-" + suffix);
+        std::strncpy(req.name, display.c_str(), MAX_NAME_LENGTH - 1);
         req.name[MAX_NAME_LENGTH - 1] = '\0';
         std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
         req.model[MAX_MODEL_LENGTH - 1] = '\0';
         req.is_host = as_host ? 1 : 0;
+        std::strncpy(req.client_uuid, client_identity_get_uuid(), sizeof(req.client_uuid) - 1);
+        req.client_uuid[sizeof(req.client_uuid) - 1] = '\0';
         std::vector<uint8_t> buf = pack(req);
         client_send_reliable(buf.data(), buf.size());
         KMP_LOG(std::string("[KenshiMP] Sent ConnectRequest name=") + req.name + " is_host=" + (req.is_host ? "1" : "0"));
@@ -483,6 +531,12 @@ static void on_chat_send_clicked(MyGUI::Widget* sender) {
     std::string msg = s_chat_input->getCaption();
     if (msg.empty()) return;
 
+    // Intercept / commands locally.
+    if (handle_chat_command(msg)) {
+        s_chat_input->setCaption("");
+        return;
+    }
+
     ui_send_chat(msg.c_str());
     s_chat_input->setCaption("");
 }
@@ -493,6 +547,59 @@ static void on_chat_key_press(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::
     }
 }
 
+static void on_chat_window_button(MyGUI::Window* sender, const std::string& name) {
+    // The X button on Kenshi_WindowCX sends "close". Hide instead of destroy
+    // so the window can be reopened later (F9).
+    if (name == "close") {
+        if (s_chat_window) s_chat_window->setVisible(false);
+    }
+}
+
+// Append a "[SYSTEM]" line from our own side (not a network chat packet).
+static void append_system_message(const std::string& text) {
+    ChatEntry entry;
+    entry.sender = "[SYSTEM]";
+    entry.message = text;
+    s_chat_log.push_back(entry);
+    refresh_chat_display();
+}
+
+// Return true if the text was a recognized command (and we handled it).
+static bool handle_chat_command(const std::string& text) {
+    if (text.empty() || text[0] != '/') return false;
+
+    // Split command and arg.
+    std::string cmd, arg;
+    size_t sp = text.find(' ');
+    if (sp == std::string::npos) {
+        cmd = text.substr(1);
+    } else {
+        cmd = text.substr(1, sp - 1);
+        arg = text.substr(sp + 1);
+    }
+
+    if (cmd == "help") {
+        append_system_message("Commands: /help, /clear, /who, /close");
+        return true;
+    }
+    if (cmd == "clear") {
+        s_chat_log.clear();
+        refresh_chat_display();
+        return true;
+    }
+    if (cmd == "close") {
+        if (s_chat_window) s_chat_window->setVisible(false);
+        return true;
+    }
+    if (cmd == "who") {
+        append_system_message("Your player id: " + itos(client_get_local_id()));
+        return true;
+    }
+
+    append_system_message("Unknown command: /" + cmd + "  (try /help)");
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -500,13 +607,18 @@ static void refresh_chat_display() {
     if (!s_chat_display) return;
 
     std::string text;
-    // Show last 50 messages
-    size_t start = s_chat_log.size() > 50 ? s_chat_log.size() - 50 : 0;
+    // Show last 200 messages (bumped from 50 — auto-scroll keeps newest visible).
+    size_t start = s_chat_log.size() > 200 ? s_chat_log.size() - 200 : 0;
     for (size_t i = start; i < s_chat_log.size(); ++i) {
         text += s_chat_log[i].sender + ": " + s_chat_log[i].message + "\n";
     }
 
     s_chat_display->setCaption(text);
+    // Scroll to bottom so the newest message is always visible. Moving the
+    // cursor past the last char forces MyGUI's EditBox to scroll its view.
+    s_chat_display->setTextCursor(text.size());
+    size_t vrange = s_chat_display->getVScrollRange();
+    if (vrange > 0) s_chat_display->setVScrollPosition(vrange - 1);
 }
 
 static void update_status_text() {
@@ -519,7 +631,7 @@ static void update_status_text() {
         );
         s_status_text->setTextColour(MyGUI::Colour(0.4f, 1.0f, 0.4f));
     } else {
-        s_status_text->setCaption("KenshiMP - Disconnected (F8 to open)");
+        s_status_text->setCaption("KenshiMP - Disconnected  (F8: connect)");
         s_status_text->setTextColour(MyGUI::Colour(1.0f, 0.6f, 0.6f));
     }
 }

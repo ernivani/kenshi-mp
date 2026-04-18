@@ -20,6 +20,7 @@ static ENetHost*   s_client  = NULL;
 static ENetPeer*   s_peer    = NULL;
 static bool        s_connected = false;
 static uint32_t    s_local_id  = 0;
+static uint32_t    s_last_disconnect_reason = 0;   // 0 = none, 1 = kicked by server
 
 // Callback for received packets — set by player_sync
 typedef void (*PacketCallback)(const uint8_t* data, size_t length);
@@ -161,6 +162,7 @@ void client_poll() {
             s_connected = false;
             s_peer = NULL;
             s_local_id = 0;
+            s_last_disconnect_reason = event.data;  // set by server; 1 == kick
             break;
 
         default:
@@ -177,5 +179,7 @@ void client_poll() {
 bool     client_is_connected()   { return s_connected; }
 uint32_t client_get_local_id()   { return s_local_id; }
 void     client_set_local_id(uint32_t id) { s_local_id = id; }
+uint32_t client_get_last_disconnect_reason() { return s_last_disconnect_reason; }
+void     client_clear_last_disconnect_reason() { s_last_disconnect_reason = 0; }
 
 } // namespace kmp

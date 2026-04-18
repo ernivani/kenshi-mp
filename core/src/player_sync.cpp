@@ -35,6 +35,8 @@ static std::string itos(uint32_t val) {
 extern void client_poll();
 extern bool client_connect(const char* host, uint16_t port);
 extern void client_disconnect();
+extern uint32_t client_get_last_disconnect_reason();
+extern void     client_clear_last_disconnect_reason();
 extern void client_send_unreliable(const uint8_t* data, size_t length);
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern bool client_is_connected();
@@ -405,25 +407,7 @@ void player_sync_tick(float dt) {
     admin_panel_check_hotkey();
     admin_panel_update(dt);
 
-    // F12: attack nearest synced NPC (joiner only)
-    static bool s_f12_was_down = false;
-    bool f12_down = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
-    if (f12_down && !s_f12_was_down && client_is_connected() && !host_sync_is_host()) {
-        Character* player = game_get_player_character();
-        if (player) {
-            Ogre::Vector3 pos = player->getPosition();
-            uint32_t target_id = npc_manager_get_nearest_remote_npc(pos.x, pos.y, pos.z, 50.0f);
-            if (target_id > 0) {
-                CombatTarget tgt;
-                tgt.player_id = client_get_local_id();
-                tgt.target_npc_id = target_id;
-                std::vector<uint8_t> buf = pack(tgt);
-                client_send_reliable(buf.data(), buf.size());
-                KMP_LOG("[KenshiMP] F12: targeting NPC " + itos(target_id));
-            }
-        }
-    }
-    s_f12_was_down = f12_down;
+    // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)
 
     // Poll network if connected
     if (client_is_connected()) {
@@ -434,8 +418,17 @@ void player_sync_tick(float dt) {
     // Detect disconnection
     if (s_was_connected && !client_is_connected()) {
         s_was_connected = false;
-        s_auto_reconnect = true;
-        KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
+        uint32_t reason = client_get_last_disconnect_reason();
+        client_clear_last_disconnect_reason();
+        if (reason == 1) {
+            // Server-initiated kick. Don't auto-reconnect — the user was
+            // explicitly asked to leave.
+            s_auto_reconnect = false;
+            KMP_LOG("[KenshiMP] Kicked by server");
+        } else {
+            s_auto_reconnect = true;
+            KMP_LOG("[KenshiMP] Connection lost, will auto-reconnect...");
+        }
         npc_manager_show_local_npcs();
         building_manager_show_local_buildings();
         ui_on_disconnect();

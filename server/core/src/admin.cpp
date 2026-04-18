@@ -54,7 +54,10 @@ void admin_kick(uint32_t player_id, const char* reason) {
         enet_peer_send(peer, CHANNEL_RELIABLE, pkt);
         enet_host_flush(peer->host);
     }
-    enet_peer_disconnect(peer, 0);
+    // Non-zero disconnect code tells the client this was an admin-initiated
+    // kick (vs. a network drop) so it suppresses auto-reconnect.
+    enet_peer_disconnect(peer, /*data=*/1);
+    enet_host_flush(peer->host);
     session_on_disconnect(peer);
 }
 

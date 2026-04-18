@@ -2,6 +2,7 @@
 build/
 build_server/
 build_injector/
+dist/
 out/
 
 # Claude Code worktrees / local agent state
