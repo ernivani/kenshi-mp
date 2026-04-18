@@ -5,6 +5,31 @@
 #   make deploy KENSHI_MOD_DIR="/path/to/Kenshi/mods/KenshiMP"
 
 # ---------------------------------------------------------------------------
+# Shell — force GNU Make to use Git Bash on Windows.
+#
+# When invoked from PowerShell or cmd.exe, sh.exe is usually not on PATH,
+# which makes Make blow up with:
+#   process_begin: CreateProcess(NULL, sh.exe -c "...") failed.
+#   make (e=2): The system cannot find the file specified.
+#
+# We locate Git for Windows via 8.3 short paths (no spaces -> no quoting
+# nightmare with SHELL) and prepend its bin directory to PATH so any
+# sub-process that itself shells out can find sh.exe too.
+# ---------------------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+_BASH_CANDIDATES := \
+    C:/PROGRA~1/Git/bin/bash.exe \
+    C:/PROGRA~2/Git/bin/bash.exe
+_FOUND_BASH := $(firstword $(wildcard $(_BASH_CANDIDATES)))
+ifeq ($(_FOUND_BASH),)
+$(error Could not find Git Bash. Install Git for Windows or run 'make' from a Git Bash shell.)
+endif
+SHELL := $(_FOUND_BASH)
+.SHELLFLAGS := -c
+export PATH := $(dir $(_FOUND_BASH)):$(PATH)
+endif
+
+# ---------------------------------------------------------------------------
 # Config (override on the command line if your paths differ)
 # ---------------------------------------------------------------------------
 ROOT            := $(CURDIR)
