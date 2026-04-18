@@ -1,0 +1,78 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:KenshiMP.Server.ViewModels"
+             x:Class="KenshiMP.Server.Views.PostureView"
+             x:DataType="vm:PostureViewModel">
+    <Grid RowDefinitions="Auto,Auto,*">
+
+        <TextBlock Grid.Row="0" Text="Posture / Animation Tester"
+                   FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+        <!-- Inject controls -->
+        <Border Grid.Row="1" Background="#1B1E24" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Inject posture" FontWeight="SemiBold" Foreground="#E6E8EB"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Target" VerticalAlignment="Center" Foreground="#8A90A0"/>
+                    <ComboBox ItemsSource="{Binding Players}"
+                              SelectedItem="{Binding Target}"
+                              MinWidth="240">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlayerRow">
+                                <TextBlock>
+                                    <Run Text="{Binding Id}"/>
+                                    <Run Text=" — "/>
+                                    <Run Text="{Binding Name}"/>
+                                </TextBlock>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <CheckBox Content="Down"    IsChecked="{Binding FlagDown}"/>
+                    <CheckBox Content="KO"      IsChecked="{Binding FlagKo}"/>
+                    <CheckBox Content="Ragdoll" IsChecked="{Binding FlagRag}"/>
+                    <CheckBox Content="Dead"    IsChecked="{Binding FlagDead}"/>
+                    <CheckBox Content="Chained" IsChecked="{Binding FlagChained}"/>
+                    <CheckBox Content="Sticky (500 ms repeat)" IsChecked="{Binding Sticky}"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Inject" Command="{Binding InjectCommand}"
+                            Background="#2A5FAA" Foreground="#FFFFFF"/>
+                    <Button Content="Clear sticky" Command="{Binding ClearCommand}"/>
+                    <TextBlock Text="{Binding StickyLabel}" VerticalAlignment="Center"
+                               Foreground="#E5C35C"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Transition log -->
+        <Border Grid.Row="2" Background="#101216" CornerRadius="6" Padding="8">
+            <Grid RowDefinitions="Auto,*">
+                <TextBlock Grid.Row="0" Text="Transition log" FontWeight="SemiBold"
+                           Foreground="#8A90A0" Margin="0,0,0,8"/>
+                <ScrollViewer Grid.Row="1">
+                    <ItemsControl ItemsSource="{Binding Transitions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PostureTransitionEntry">
+                                <TextBlock FontFamily="Consolas" FontSize="12" Foreground="#E6E8EB">
+                                    <Run Text="["/>
+                                    <Run Text="{Binding Time}" Foreground="#777"/>
+                                    <Run Text="] P"/>
+                                    <Run Text="{Binding PlayerId}" Foreground="#7CC4FF"/>
+                                    <Run Text=" "/>
+                                    <Run Text="{Binding OldLabel}" Foreground="#888"/>
+                                    <Run Text=" → "/>
+                                    <Run Text="{Binding NewLabel}" Foreground="#E5C35C"/>
+                                </TextBlock>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
