@@ -34,6 +34,14 @@ compile_commands.json
 *.pdb
 *.ilk
 
+# .NET (Avalonia GUI)
+bin/
+obj/
+*.user
+.vs/
+*.binlog
+*.nupkg
+
 # OS files
 Thumbs.db
 desktop.ini

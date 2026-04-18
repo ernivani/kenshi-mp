@@ -28,6 +28,13 @@ namespace PacketType {
     static const uint8_t COMBAT_TARGET      = 0x56;
     static const uint8_t BUILDING_SPAWN_REMOTE   = 0x60;
     static const uint8_t BUILDING_DESPAWN_REMOTE = 0x62;
+    // Server-authored spawns: broadcast to ALL peers (host + joiners).
+    // Wire layouts match NPC_SPAWN_REMOTE / NPC_DESPAWN_REMOTE /
+    // BUILDING_SPAWN_REMOTE / BUILDING_DESPAWN_REMOTE respectively.
+    static const uint8_t SERVER_SPAWN_NPC        = 0x70;
+    static const uint8_t SERVER_DESPAWN_NPC      = 0x71;
+    static const uint8_t SERVER_SPAWN_BUILDING   = 0x72;
+    static const uint8_t SERVER_DESPAWN_BUILDING = 0x73;
 }
 
 // ---------------------------------------------------------------------------

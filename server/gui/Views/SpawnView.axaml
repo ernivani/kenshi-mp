@@ -1,0 +1,142 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:KenshiMP.Server.ViewModels"
+             x:Class="KenshiMP.Server.Views.SpawnView"
+             x:DataType="vm:SpawnViewModel">
+    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*,*">
+
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2"
+                   Text="Spawn entities (broadcast to host + joiners)"
+                   FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+        <!-- NPC form + list -->
+        <Border Grid.Row="1" Grid.Column="0"
+                Background="#1B1E24" CornerRadius="6" Padding="12" Margin="0,0,6,0">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <TextBlock Grid.Row="0" Text="NPC" FontWeight="SemiBold" Foreground="#E6E8EB"
+                           Margin="0,0,0,8"/>
+
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                      Margin="0,0,0,8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Name"   Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <TextBox   Grid.Row="0" Grid.Column="1" Text="{Binding NpcName, Mode=TwoWay}" Margin="0,2"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Race"   Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <TextBox   Grid.Row="1" Grid.Column="1" Text="{Binding NpcRace, Mode=TwoWay}" Margin="0,2"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Weapon" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <TextBox   Grid.Row="2" Grid.Column="1" Text="{Binding NpcWeapon, Mode=TwoWay}" Margin="0,2"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Armour" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <TextBox   Grid.Row="3" Grid.Column="1" Text="{Binding NpcArmour, Mode=TwoWay}" Margin="0,2"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="X / Y / Z" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="0,2">
+                        <NumericUpDown Value="{Binding NpcX, Mode=TwoWay}" Width="110"/>
+                        <NumericUpDown Value="{Binding NpcY, Mode=TwoWay}" Width="110"/>
+                        <NumericUpDown Value="{Binding NpcZ, Mode=TwoWay}" Width="110"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Yaw" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding NpcYaw, Mode=TwoWay}"
+                                   HorizontalAlignment="Left" Width="110" Margin="0,2"/>
+                </Grid>
+
+                <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom"/>
+
+                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                    <Button Grid.Row="0" Content="Spawn NPC" Command="{Binding SpawnNpcCommand}"
+                            Background="#2A5FAA" Foreground="#FFFFFF"
+                            HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Npcs}"
+                              IsReadOnly="True" GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              Background="Transparent" RowBackground="Transparent">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID"       Binding="{Binding Id}"       Width="90"/>
+                            <DataGridTextColumn Header="Name"     Binding="{Binding Name}"     Width="*"/>
+                            <DataGridTextColumn Header="Race"     Binding="{Binding Race}"     Width="120"/>
+                            <DataGridTextColumn Header="Position" Binding="{Binding Position}" Width="160"/>
+                            <DataGridTemplateColumn Header="" Width="90">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:SpawnedNpcRow">
+                                        <Button Content="Despawn" Padding="6,2"
+                                                Background="#7A2A2A" Foreground="#FFFFFF"
+                                                Command="{Binding $parent[DataGrid].((vm:SpawnViewModel)DataContext).DespawnNpcCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Building form + list -->
+        <Border Grid.Row="1" Grid.Column="1"
+                Background="#1B1E24" CornerRadius="6" Padding="12" Margin="6,0,0,0">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <TextBlock Grid.Row="0" Text="Building" FontWeight="SemiBold" Foreground="#E6E8EB"
+                           Margin="0,0,0,8"/>
+
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                      Margin="0,0,0,8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="stringID" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <TextBox   Grid.Row="0" Grid.Column="1" Text="{Binding BldStringID, Mode=TwoWay}" Margin="0,2"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="X / Y / Z" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="0,2">
+                        <NumericUpDown Value="{Binding BldX, Mode=TwoWay}" Width="110"/>
+                        <NumericUpDown Value="{Binding BldY, Mode=TwoWay}" Width="110"/>
+                        <NumericUpDown Value="{Binding BldZ, Mode=TwoWay}" Width="110"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Rot (qw qx qy qz)" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="0,2">
+                        <NumericUpDown Value="{Binding BldQw, Mode=TwoWay}" Width="80"/>
+                        <NumericUpDown Value="{Binding BldQx, Mode=TwoWay}" Width="80"/>
+                        <NumericUpDown Value="{Binding BldQy, Mode=TwoWay}" Width="80"/>
+                        <NumericUpDown Value="{Binding BldQz, Mode=TwoWay}" Width="80"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Floor" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
+                    <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding BldFloor, Mode=TwoWay}"
+                                   HorizontalAlignment="Left" Width="110" Margin="0,2"/>
+
+                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,4,0,2">
+                        <CheckBox Content="Completed" IsChecked="{Binding BldCompleted}"/>
+                        <CheckBox Content="Foliage"   IsChecked="{Binding BldIsFoliage}"/>
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                    <Button Grid.Row="0" Content="Spawn Building" Command="{Binding SpawnBuildingCommand}"
+                            Background="#2A5FAA" Foreground="#FFFFFF"
+                            HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding Buildings}"
+                              IsReadOnly="True" GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              Background="Transparent" RowBackground="Transparent">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID"       Binding="{Binding Id}"        Width="90"/>
+                            <DataGridTextColumn Header="stringID" Binding="{Binding StringID}"  Width="*"/>
+                            <DataGridTextColumn Header="Position" Binding="{Binding Position}"  Width="160"/>
+                            <DataGridTextColumn Header="Floor"    Binding="{Binding Floor}"     Width="60"/>
+                            <DataGridTemplateColumn Header="" Width="90">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate x:DataType="vm:SpawnedBuildingRow">
+                                        <Button Content="Despawn" Padding="6,2"
+                                                Background="#7A2A2A" Foreground="#FFFFFF"
+                                                Command="{Binding $parent[DataGrid].((vm:SpawnViewModel)DataContext).DespawnBuildingCommand}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

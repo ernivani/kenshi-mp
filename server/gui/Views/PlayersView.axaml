@@ -1,0 +1,43 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:KenshiMP.Server.ViewModels"
+             x:Class="KenshiMP.Server.Views.PlayersView"
+             x:DataType="vm:PlayersViewModel">
+    <Grid RowDefinitions="Auto,*">
+        <TextBlock Grid.Row="0" Text="Connected Players"
+                   FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+        <Border Grid.Row="1" Background="#1B1E24" CornerRadius="6" Padding="0">
+            <DataGrid ItemsSource="{Binding Players}"
+                      SelectedItem="{Binding Selected}"
+                      IsReadOnly="True"
+                      GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column"
+                      Background="Transparent"
+                      RowBackground="Transparent">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="ID"       Binding="{Binding Id}"        Width="60"/>
+                    <DataGridTextColumn Header="Name"     Binding="{Binding Name}"      Width="150"/>
+                    <DataGridTextColumn Header="Model"    Binding="{Binding Model}"     Width="120"/>
+                    <DataGridTextColumn Header="Address"  Binding="{Binding Address}"   Width="180"/>
+                    <DataGridTextColumn Header="Ping"     Binding="{Binding PingMs}"    Width="70"/>
+                    <DataGridCheckBoxColumn Header="Host" Binding="{Binding IsHost}"    Width="60"/>
+                    <DataGridTextColumn Header="Idle"     Binding="{Binding IdleSeconds}" Width="80"/>
+                    <DataGridTextColumn Header="Posture"  Binding="{Binding PostureLabel}" Width="*"/>
+                    <DataGridTemplateColumn Header="Actions" Width="100">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate x:DataType="vm:PlayerRow">
+                                <Button Content="Kick"
+                                        Background="#7A2A2A"
+                                        Foreground="#FFFFFF"
+                                        Padding="10,2"
+                                        Command="{Binding $parent[DataGrid].((vm:PlayersViewModel)DataContext).KickCommand}"
+                                        CommandParameter="{Binding}"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </Grid>
+</UserControl>

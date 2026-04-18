@@ -284,6 +284,38 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    // --- Server-authored spawns: processed on BOTH host and joiner. ---
+    // Wire layout identical to the NPC_/BUILDING_ variants — just a different
+    // type byte so core can intentionally bypass the "host is authority" guard.
+    case PacketType::SERVER_SPAWN_NPC: {
+        NPCSpawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_remote_spawn(pkt);
+        }
+        break;
+    }
+    case PacketType::SERVER_DESPAWN_NPC: {
+        NPCDespawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            npc_manager_on_remote_despawn(pkt.npc_id);
+        }
+        break;
+    }
+    case PacketType::SERVER_SPAWN_BUILDING: {
+        BuildingSpawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            building_manager_on_remote_spawn(pkt);
+        }
+        break;
+    }
+    case PacketType::SERVER_DESPAWN_BUILDING: {
+        BuildingDespawnRemote pkt;
+        if (unpack(data, length, pkt)) {
+            building_manager_on_remote_despawn(pkt.building_id);
+        }
+        break;
+    }
+
     case PacketType::COMBAT_ATTACK: {
         if (host_sync_is_host()) {
             CombatAttack pkt;

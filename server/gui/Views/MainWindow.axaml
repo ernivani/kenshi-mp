@@ -1,0 +1,71 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:KenshiMP.Server.ViewModels"
+        xmlns:v="using:KenshiMP.Server.Views"
+        x:Class="KenshiMP.Server.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="1200" Height="780"
+        Title="KenshiMP Server"
+        Background="#14161A">
+
+    <Grid ColumnDefinitions="220,*">
+
+        <!-- Sidebar -->
+        <Border Grid.Column="0" Background="#1B1E24" Padding="16">
+            <StackPanel Spacing="16">
+                <TextBlock Text="KenshiMP" FontSize="22" FontWeight="Bold" Foreground="#E6E8EB"/>
+                <TextBlock Text="Dedicated Server" FontSize="12" Foreground="#8A90A0"/>
+
+                <Border Height="1" Background="#2A2E38" Margin="0,4,0,4"/>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Status" FontSize="11" Foreground="#8A90A0"/>
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap"
+                               FontSize="13" Foreground="#5FD196"/>
+                </StackPanel>
+
+                <Border Height="1" Background="#2A2E38" Margin="0,4,0,4"/>
+
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Uptime" FontSize="11" Foreground="#8A90A0"/>
+                    <TextBlock Text="{Binding StatsVm.Uptime}" FontSize="14" Foreground="#E6E8EB"/>
+                    <TextBlock Text="Players" FontSize="11" Foreground="#8A90A0" Margin="0,8,0,0"/>
+                    <TextBlock Text="{Binding StatsVm.Players}" FontSize="14" Foreground="#E6E8EB"/>
+                </StackPanel>
+
+                <Border Height="1" Background="#2A2E38" Margin="0,4,0,4"/>
+
+                <Button Command="{Binding ShutdownCommand}"
+                        HorizontalAlignment="Stretch"
+                        Background="#7A2A2A"
+                        Foreground="#FFFFFF"
+                        Content="Shutdown"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Content -->
+        <TabControl Grid.Column="1" Padding="16" Background="Transparent">
+            <TabItem Header="Players">
+                <v:PlayersView DataContext="{Binding PlayersVm}"/>
+            </TabItem>
+            <TabItem Header="Chat">
+                <v:ChatView DataContext="{Binding ChatVm}"/>
+            </TabItem>
+            <TabItem Header="Posture">
+                <v:PostureView DataContext="{Binding PostureVm}"/>
+            </TabItem>
+            <TabItem Header="Spawn">
+                <v:SpawnView DataContext="{Binding SpawnVm}"/>
+            </TabItem>
+            <TabItem Header="Log">
+                <v:LogView DataContext="{Binding LogVm}"/>
+            </TabItem>
+            <TabItem Header="Stats">
+                <v:StatsView DataContext="{Binding StatsVm}"/>
+            </TabItem>
+            <TabItem Header="Config">
+                <v:ConfigView DataContext="{Binding ConfigVm}"/>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

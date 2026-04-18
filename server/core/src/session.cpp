@@ -3,9 +3,11 @@
 // Tracks connected players, assigns IDs, handles connect/disconnect/timeout.
 
 #include <map>
+#include <deque>
 #include <chrono>
 #include <cstring>
 #include <vector>
+#include <string>
 
 #include <enet/enet.h>
 #include <spdlog/spdlog.h>
@@ -13,6 +15,9 @@
 #include "packets.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "posture.h"
+#include "session_api.h"
+#include "events.h"
 
 namespace kmp {
 
@@ -34,7 +39,10 @@ struct PlayerSession {
     char        model[MAX_MODEL_LENGTH];
     float       x, y, z;
     float       yaw;
+    float       speed;
     bool        is_host;
+    uint32_t    last_animation_id;
+    uint8_t     last_posture_flags;
     std::chrono::steady_clock::time_point last_activity;
 };
 
@@ -42,6 +50,18 @@ static std::map<uint32_t, PlayerSession> s_sessions;        // id -> session
 static std::map<ENetPeer*, uint32_t>     s_peer_to_id;      // peer -> id
 static uint32_t s_next_id = 1;
 static uint32_t s_host_id = 0;  // player ID of the host (0 = no host)
+
+// Chat + posture log rings (GUI panes consume these).
+static constexpr size_t CHAT_RING_MAX     = 512;
+static constexpr size_t POSTURE_RING_MAX  = 512;
+static std::deque<ChatLogEntry>      s_chat_log;
+static std::deque<PostureTransition> s_posture_log;
+
+static uint64_t now_wall_ms() {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(
+        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+}
 
 // ---------------------------------------------------------------------------
 // Init
@@ -74,6 +94,7 @@ void session_on_disconnect(ENetPeer* peer) {
         spdlog::info("Host player disconnected");
     }
     spdlog::info("Player {} ('{}') disconnected", id, s_sessions[id].name);
+    events_emit_player_disconnected(id, s_sessions[id].name);
 
     // Notify all other clients
     PlayerDisconnect pkt;
@@ -113,6 +134,9 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     std::strncpy(session.model, req.model, MAX_MODEL_LENGTH - 1);
     session.model[MAX_MODEL_LENGTH - 1] = '\0';
     session.x = session.y = session.z = session.yaw = 0.0f;
+    session.speed = 0.0f;
+    session.last_animation_id = 0;
+    session.last_posture_flags = 0;
     session.last_activity = std::chrono::steady_clock::now();
     session.is_host = (req.is_host != 0);
     if (session.is_host && s_host_id == 0) {
@@ -124,6 +148,7 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     s_peer_to_id[peer] = id;
 
     spdlog::info("Player {} ('{}') joined with model '{}'", id, session.name, session.model);
+    events_emit_player_connected(id, session.name);
 
     // Send accept
     ConnectAccept accept;
@@ -176,7 +201,28 @@ static void handle_player_state(ENetPeer* peer, const uint8_t* data, size_t leng
     session.y = state.y;
     session.z = state.z;
     session.yaw = state.yaw;
+    session.speed = state.speed;
     session.last_activity = std::chrono::steady_clock::now();
+
+    // Track posture flag transitions (low 8 bits of animation_id).
+    uint8_t new_flags = posture_flags_from_anim(state.animation_id);
+    if (new_flags != session.last_posture_flags) {
+        PostureTransition t;
+        t.player_id   = id;
+        t.player_name = session.name;
+        t.old_flags   = session.last_posture_flags;
+        t.new_flags   = new_flags;
+        t.time_ms     = now_wall_ms();
+        s_posture_log.push_back(std::move(t));
+        if (s_posture_log.size() > POSTURE_RING_MAX) s_posture_log.pop_front();
+        spdlog::debug("Player {} posture {} -> {}",
+            id,
+            posture_short_label(session.last_posture_flags),
+            posture_short_label(new_flags));
+        events_emit_posture(id, session.name, session.last_posture_flags, new_flags);
+    }
+    session.last_animation_id  = state.animation_id;
+    session.last_posture_flags = new_flags;
 
     // Stamp the correct player_id (don't trust client)
     PlayerState relayed = state;
@@ -198,6 +244,9 @@ static void handle_chat_message(ENetPeer* peer, const uint8_t* data, size_t leng
 
     uint32_t id = it->second;
     spdlog::info("[Chat] Player {}: {}", id, msg.message);
+
+    session_chat_push(id, s_sessions[id].name, msg.message);
+    events_emit_chat(id, s_sessions[id].name, msg.message);
 
     // Stamp correct player_id and broadcast to all (including sender)
     ChatMessage relayed = msg;
@@ -329,6 +378,88 @@ void session_check_timeouts() {
         enet_peer_disconnect(peer, 0);
         session_on_disconnect(peer);
     }
+}
+
+// ---------------------------------------------------------------------------
+// GUI / admin-facing snapshot API
+// ---------------------------------------------------------------------------
+void session_get_players(std::vector<PlayerInfo>& out) {
+    out.clear();
+    out.reserve(s_sessions.size());
+    auto now = std::chrono::steady_clock::now();
+    for (auto& pair : s_sessions) {
+        const auto& s = pair.second;
+        PlayerInfo p;
+        p.id      = s.id;
+        p.name    = s.name;
+        p.model   = s.model;
+        p.is_host = s.is_host;
+        p.x       = s.x;
+        p.y       = s.y;
+        p.z       = s.z;
+        p.yaw     = s.yaw;
+        p.speed   = s.speed;
+        p.last_animation_id  = s.last_animation_id;
+        p.last_posture_flags = s.last_posture_flags;
+        if (s.peer) {
+            char addr[64] = {0};
+            enet_address_get_host_ip(&s.peer->address, addr, sizeof(addr));
+            p.address = std::string(addr) + ":" + std::to_string(s.peer->address.port);
+            p.ping_ms = s.peer->roundTripTime;
+        } else {
+            p.address = "";
+            p.ping_ms = 0;
+        }
+        p.idle_ms = static_cast<uint32_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - s.last_activity).count());
+        out.push_back(std::move(p));
+    }
+}
+
+ENetPeer* session_find_peer(uint32_t player_id) {
+    auto it = s_sessions.find(player_id);
+    if (it == s_sessions.end()) return nullptr;
+    return it->second.peer;
+}
+
+bool session_get_player_snapshot(uint32_t player_id, PlayerInfo& out) {
+    auto it = s_sessions.find(player_id);
+    if (it == s_sessions.end()) return false;
+    const auto& s = it->second;
+    out.id      = s.id;
+    out.name    = s.name;
+    out.model   = s.model;
+    out.is_host = s.is_host;
+    out.x       = s.x;
+    out.y       = s.y;
+    out.z       = s.z;
+    out.yaw     = s.yaw;
+    out.speed   = s.speed;
+    out.last_animation_id  = s.last_animation_id;
+    out.last_posture_flags = s.last_posture_flags;
+    out.address = "";
+    out.ping_ms = 0;
+    out.idle_ms = 0;
+    return true;
+}
+
+void session_chat_push(uint32_t player_id, const std::string& author, const std::string& text) {
+    ChatLogEntry e;
+    e.player_id = player_id;
+    e.author    = author;
+    e.text      = text;
+    e.time_ms   = now_wall_ms();
+    s_chat_log.push_back(std::move(e));
+    if (s_chat_log.size() > CHAT_RING_MAX) s_chat_log.pop_front();
+}
+
+void session_chat_snapshot(std::vector<ChatLogEntry>& out) {
+    out.assign(s_chat_log.begin(), s_chat_log.end());
+}
+
+void session_posture_snapshot(std::vector<PostureTransition>& out) {
+    out.assign(s_posture_log.begin(), s_posture_log.end());
 }
 
 } // namespace kmp
