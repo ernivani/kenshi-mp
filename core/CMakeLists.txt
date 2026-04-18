@@ -14,6 +14,7 @@ add_library(KenshiMP SHARED
     src/building_manager.cpp
     src/admin_panel.cpp
     src/ui.cpp
+    src/client_identity.cpp
 )
 
 # KenshiLib PerfTimer.h uses wide-string CreateMutex

@@ -46,8 +46,9 @@ struct PlayerSession {
     std::chrono::steady_clock::time_point last_activity;
 };
 
-static std::map<uint32_t, PlayerSession> s_sessions;        // id -> session
-static std::map<ENetPeer*, uint32_t>     s_peer_to_id;      // peer -> id
+static std::map<uint32_t, PlayerSession>   s_sessions;        // id -> session
+static std::map<ENetPeer*, uint32_t>       s_peer_to_id;      // peer -> id
+static std::map<std::string, uint32_t>     s_uuid_to_id;      // stable identity
 static uint32_t s_next_id = 1;
 static uint32_t s_host_id = 0;  // player ID of the host (0 = no host)
 
@@ -93,14 +94,25 @@ void session_on_disconnect(ENetPeer* peer) {
         s_host_id = 0;
         spdlog::info("Host player disconnected");
     }
-    spdlog::info("Player {} ('{}') disconnected", id, s_sessions[id].name);
-    events_emit_player_disconnected(id, s_sessions[id].name);
+    std::string left_name = s_sessions[id].name;
+    spdlog::info("Player {} ('{}') disconnected", id, left_name);
+    events_emit_player_disconnected(id, left_name);
 
-    // Notify all other clients
+    // Notify all other clients (PlayerDisconnect + human-readable chat line).
     PlayerDisconnect pkt;
     pkt.player_id = id;
     auto buf = pack(pkt);
     relay_broadcast(peer, buf.data(), buf.size(), true);
+
+    {
+        ChatMessage announce;
+        announce.player_id = 0;
+        std::string text = left_name + " left";
+        safe_strcpy(announce.message, text.c_str());
+        auto abuf = pack(announce);
+        relay_broadcast(peer, abuf.data(), abuf.size(), true);
+        session_chat_push(0, "<server>", text);
+    }
 
     world_state_remove_player(id);
     s_sessions.erase(id);
@@ -124,8 +136,30 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
         return;
     }
 
-    // Create session
-    uint32_t id = s_next_id++;
+    // Resolve stable player id from client_uuid. If the UUID is known, reuse
+    // the same id so reconnects don't create a fresh identity. If the owner of
+    // that id is still connected (e.g. two clients using the same UUID), fall
+    // back to a fresh id and log.
+    std::string uuid;
+    if (req.client_uuid[0] != '\0') uuid = req.client_uuid;
+
+    uint32_t id = 0;
+    if (!uuid.empty()) {
+        auto known = s_uuid_to_id.find(uuid);
+        if (known != s_uuid_to_id.end()) {
+            uint32_t old_id = known->second;
+            if (s_sessions.find(old_id) == s_sessions.end()) {
+                id = old_id;
+                spdlog::info("Player rejoined with stable id {} (uuid {})", id, uuid);
+            } else {
+                spdlog::warn("uuid {} already in use by connected player {}; "
+                             "issuing a new id", uuid, old_id);
+            }
+        }
+    }
+    if (id == 0) id = s_next_id++;
+    if (!uuid.empty()) s_uuid_to_id[uuid] = id;
+
     PlayerSession session;
     session.id = id;
     session.peer = peer;
@@ -184,6 +218,17 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     relay_broadcast(peer, buf_spawn.data(), buf_spawn.size(), true);
 
     world_state_add_player(id, session.name, session.model);
+
+    // Announce the join in chat so every client (and the server GUI) sees it.
+    {
+        ChatMessage announce;
+        announce.player_id = 0;  // server sentinel — clients render as [Server]
+        std::string text = std::string(session.name) + " joined";
+        safe_strcpy(announce.message, text.c_str());
+        auto abuf = pack(announce);
+        relay_broadcast(nullptr, abuf.data(), abuf.size(), true);
+        session_chat_push(0, "<server>", text);
+    }
 }
 
 static void handle_player_state(ENetPeer* peer, const uint8_t* data, size_t length) {

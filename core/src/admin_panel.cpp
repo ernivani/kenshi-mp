@@ -363,12 +363,8 @@ void admin_panel_toggle() {
 }
 
 void admin_panel_check_hotkey() {
-    static bool s_f10_was_down = false;
-    bool f10_down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
-    if (f10_down && !s_f10_was_down) {
-        admin_panel_toggle();
-    }
-    s_f10_was_down = f10_down;
+    // F10 binding removed — F10 now toggles the chat (see ui.cpp). The admin
+    // panel can be reached from the server GUI / debug commands instead.
 }
 
 // ---------------------------------------------------------------------------

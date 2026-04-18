@@ -56,6 +56,10 @@ struct ConnectRequest {
     char         name[MAX_NAME_LENGTH];
     char         model[MAX_MODEL_LENGTH];
     uint8_t      is_host;
+    // Stable per-installation identity. The client generates a UUID once (at
+    // first run) and persists it; the server maps uuid → player_id so a player
+    // who reconnects gets the same id as before.
+    char         client_uuid[64];
 
     ConnectRequest() {
         std::memset(this, 0, sizeof(*this));
