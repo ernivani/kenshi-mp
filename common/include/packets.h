@@ -28,6 +28,16 @@ namespace PacketType {
     static const uint8_t COMBAT_TARGET      = 0x56;
     static const uint8_t BUILDING_SPAWN_REMOTE   = 0x60;
     static const uint8_t BUILDING_DESPAWN_REMOTE = 0x62;
+    // Server-authored spawns: broadcast to ALL peers (host + joiners).
+    // Wire layouts match NPC_SPAWN_REMOTE / NPC_DESPAWN_REMOTE /
+    // BUILDING_SPAWN_REMOTE / BUILDING_DESPAWN_REMOTE respectively.
+    static const uint8_t SERVER_SPAWN_NPC        = 0x70;
+    static const uint8_t SERVER_DESPAWN_NPC      = 0x71;
+    static const uint8_t SERVER_SPAWN_BUILDING   = 0x72;
+    static const uint8_t SERVER_DESPAWN_BUILDING = 0x73;
+    // Host-originated admin command: move a target player to a location.
+    // Host → server → target-peer; target client applies it to its own char.
+    static const uint8_t FORCE_TELEPORT          = 0x80;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +59,10 @@ struct ConnectRequest {
     char         name[MAX_NAME_LENGTH];
     char         model[MAX_MODEL_LENGTH];
     uint8_t      is_host;
+    // Stable per-installation identity. The client generates a UUID once (at
+    // first run) and persists it; the server maps uuid → player_id so a player
+    // who reconnects gets the same id as before.
+    char         client_uuid[64];
 
     ConnectRequest() {
         std::memset(this, 0, sizeof(*this));
@@ -79,12 +93,23 @@ struct ConnectReject {
     }
 };
 
+// Posture flags packed into PlayerState::animation_id (Phase A).
+// Only the low 8 bits are used; upper bits reserved for future anim-id use.
+static const uint32_t POSTURE_DOWN        = 1u << 0;
+static const uint32_t POSTURE_UNCONSCIOUS = 1u << 1;
+static const uint32_t POSTURE_RAGDOLL     = 1u << 2;
+static const uint32_t POSTURE_DEAD        = 1u << 3;
+static const uint32_t POSTURE_CHAINED     = 1u << 4;
+// Any flag in this mask means the avatar should be ragdolled on receivers.
+static const uint32_t POSTURE_RAGDOLL_MASK =
+    POSTURE_DOWN | POSTURE_UNCONSCIOUS | POSTURE_RAGDOLL | POSTURE_DEAD;
+
 struct PlayerState {
     PacketHeader header;
     uint32_t     player_id;
     float        x, y, z;          // world position
     float        yaw;              // rotation around Y axis (radians)
-    uint32_t     animation_id;     // current animation state hash
+    uint32_t     animation_id;     // low 8 bits: posture flags (POSTURE_*)
     float        speed;            // movement speed (for animation blending)
 
     PlayerState() {
@@ -285,6 +310,20 @@ struct BuildingDespawnRemote {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::BUILDING_DESPAWN_REMOTE;
+    }
+};
+
+// Admin: force a target player to a position. Sent by host client → server;
+// server forwards to the target peer if the sender is the host.
+struct ForceTeleport {
+    PacketHeader header;
+    uint32_t     target_player_id;
+    float        x, y, z;
+
+    ForceTeleport() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::FORCE_TELEPORT;
     }
 };
 

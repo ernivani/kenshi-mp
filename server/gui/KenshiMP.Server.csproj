@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <AssemblyName>kenshi-mp-server</AssemblyName>
+    <RootNamespace>KenshiMP.Server</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.2" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.2">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.2.2" />
+  </ItemGroup>
+
+  <!-- Copy the native core DLL next to the built GUI exe. -->
+  <ItemGroup>
+    <None Include="$(MSBuildProjectDirectory)\..\..\build_server\bin\$(Configuration)\kenshi-mp-server-core.dll"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\build_server\bin\$(Configuration)\kenshi-mp-server-core.dll')">
+      <Link>kenshi-mp-server-core.dll</Link>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+</Project>

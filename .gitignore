@@ -2,6 +2,7 @@
 build/
 build_server/
 build_injector/
+dist/
 out/
 
 # Claude Code worktrees / local agent state
@@ -33,6 +34,14 @@ compile_commands.json
 *.obj
 *.pdb
 *.ilk
+
+# .NET (Avalonia GUI)
+bin/
+obj/
+*.user
+.vs/
+*.binlog
+*.nupkg
 
 # OS files
 Thumbs.db
