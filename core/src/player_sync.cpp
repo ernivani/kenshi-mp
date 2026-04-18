@@ -128,7 +128,15 @@ static bool read_local_player_state(PlayerState& out) {
     }
 
     out.speed = ch->getMovementSpeed();
-    out.animation_id = 0;
+
+    uint32_t posture = 0;
+    if (ch->isDown())         posture |= POSTURE_DOWN;
+    if (ch->isUnconcious())   posture |= POSTURE_UNCONSCIOUS;
+    if (ch->isRagdoll())      posture |= POSTURE_RAGDOLL;
+    if (ch->isDead())         posture |= POSTURE_DEAD;
+    if (ch->isChainedMode())  posture |= POSTURE_CHAINED;
+    out.animation_id = posture;
+
     out.player_id = client_get_local_id();
 
     return true;
