@@ -124,7 +124,7 @@ void ui_init() {
     host_label->setTextColour(textCol);
 
     s_host_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxEmptySkin",
+        "Kenshi_EditBox",
         MyGUI::IntCoord(75, 10, 220, 26),
         MyGUI::Align::Default,
         "KMP_HostInput"
@@ -145,7 +145,7 @@ void ui_init() {
     port_label->setTextColour(textCol);
 
     s_port_input = s_connect_window->createWidget<MyGUI::EditBox>(
-        "Kenshi_EditBoxEmptySkin",
+        "Kenshi_EditBox",
         MyGUI::IntCoord(75, 44, 220, 26),
         MyGUI::Align::Default,
         "KMP_PortInput"
