@@ -318,6 +318,23 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    // Host-initiated teleport targeting this client. Character::teleport
+    // takes an ABSOLUTE position (same call convention npc_manager uses).
+    case PacketType::FORCE_TELEPORT: {
+        ForceTeleport pkt;
+        if (unpack(data, length, pkt)) {
+            if (pkt.target_player_id == client_get_local_id()) {
+                Character* me = game_get_player_character();
+                if (me) {
+                    Ogre::Vector3 dest(pkt.x, pkt.y, pkt.z);
+                    me->teleport(dest);
+                    KMP_LOG("[KenshiMP] Force-teleported by host");
+                }
+            }
+        }
+        break;
+    }
+
     case PacketType::COMBAT_ATTACK: {
         if (host_sync_is_host()) {
             CombatAttack pkt;

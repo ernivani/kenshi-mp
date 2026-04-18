@@ -588,8 +588,11 @@ static bool handle_chat_command(const std::string& text) {
 
     if (cmd == "help") {
         append_system_message("Common: /help /clear /who /close /pos");
-        if (is_host)
-            append_system_message("Host:   /players /tp <id> /tphere <id>");
+        append_system_message("Tp:     /tp <id> | /tp <x> <y> <z>");
+        if (is_host) {
+            append_system_message("Host:   /players /summon <id>");
+            append_system_message("Host:   /tp <id> <x> <y> <z>   (move a player)");
+        }
         return true;
     }
     if (cmd == "clear") {
@@ -620,54 +623,101 @@ static bool handle_chat_command(const std::string& text) {
         return true;
     }
 
-    // ---- host-only commands ----
-    if (!is_host) {
-        if (cmd == "players" || cmd == "tp" || cmd == "tphere") {
-            append_system_message("/" + cmd + " is host-only");
+    if (cmd == "players") {
+        if (!is_host) { append_system_message("/players is host-only"); return true; }
+        std::vector<uint32_t> ids;
+        npc_manager_list_remote_players(ids);
+        if (ids.empty()) {
+            append_system_message("No remote players tracked");
             return true;
         }
-    } else {
-        if (cmd == "players") {
-            std::vector<uint32_t> ids;
-            npc_manager_list_remote_players(ids);
-            if (ids.empty()) {
-                append_system_message("No remote players tracked");
-                return true;
-            }
-            Character* me = game_get_player_character();
-            Ogre::Vector3 my = me ? me->getPosition() : Ogre::Vector3::ZERO;
-            for (size_t i = 0; i < ids.size(); ++i) {
-                Character* ch = npc_manager_get_player_avatar(ids[i]);
-                if (!ch) continue;
-                Ogre::Vector3 p = ch->getPosition();
-                float d = my.distance(p);
-                std::ostringstream ss;
-                ss.precision(0);
-                ss << std::fixed << "Player " << ids[i] << " at ("
-                   << p.x << ", " << p.y << ", " << p.z << ")  dist=" << d;
-                append_system_message(ss.str());
-            }
-            return true;
+        Character* me = game_get_player_character();
+        Ogre::Vector3 my = me ? me->getPosition() : Ogre::Vector3::ZERO;
+        for (size_t i = 0; i < ids.size(); ++i) {
+            Character* ch = npc_manager_get_player_avatar(ids[i]);
+            if (!ch) continue;
+            Ogre::Vector3 p = ch->getPosition();
+            float d = my.distance(p);
+            std::ostringstream ss;
+            ss.precision(0);
+            ss << std::fixed << "Player " << ids[i] << " at ("
+               << p.x << ", " << p.y << ", " << p.z << ")  dist=" << d;
+            append_system_message(ss.str());
         }
-        if (cmd == "tp") {
-            uint32_t target = (uint32_t)atoi(arg.c_str());
+        return true;
+    }
+
+    // /tp — overloaded:
+    //   /tp <id>              → self → that player       (any player)
+    //   /tp <x> <y> <z>       → self → location          (any player)
+    //   /tp <id> <x> <y> <z>  → that player → location   (host only)
+    if (cmd == "tp") {
+        // Tokenise the argument.
+        std::vector<std::string> tok;
+        {
+            std::istringstream ss(arg);
+            std::string t;
+            while (ss >> t) tok.push_back(t);
+        }
+        Character* me = game_get_player_character();
+
+        if (tok.size() == 1) {
+            uint32_t target = (uint32_t)atoi(tok[0].c_str());
             Character* ch = npc_manager_get_player_avatar(target);
-            Character* me = game_get_player_character();
-            if (!ch)      { append_system_message("No such player: " + arg); return true; }
-            if (!me)      { append_system_message("No local character"); return true; }
-            Ogre::Vector3 target_pos = ch->getPosition();
-            Ogre::Vector3 my = me->getPosition();
-            Ogre::Vector3 delta = target_pos - my;
-            me->teleport(delta);
+            if (!ch) { append_system_message("No such player: " + tok[0]); return true; }
+            if (!me) { append_system_message("No local character"); return true; }
+            // Character::teleport takes an ABSOLUTE position despite the
+            // "moveBy" name in the header (see npc_manager.cpp:472 for the
+            // working reference call).
+            me->teleport(ch->getPosition());
             append_system_message("Teleported to player " + itos(target));
             return true;
         }
-        if (cmd == "tphere") {
-            // Bring a player TO the host — needs a server-side protocol we
-            // haven't added yet. Stub with a clear message.
-            append_system_message("/tphere is not yet implemented (requires server protocol)");
+        if (tok.size() == 3) {
+            if (!me) { append_system_message("No local character"); return true; }
+            Ogre::Vector3 dest((float)atof(tok[0].c_str()),
+                               (float)atof(tok[1].c_str()),
+                               (float)atof(tok[2].c_str()));
+            me->teleport(dest);
+            append_system_message("Teleported to location");
             return true;
         }
+        if (tok.size() == 4) {
+            if (!is_host) { append_system_message("Moving another player is host-only"); return true; }
+            uint32_t target = (uint32_t)atoi(tok[0].c_str());
+            float x = (float)atof(tok[1].c_str());
+            float y = (float)atof(tok[2].c_str());
+            float z = (float)atof(tok[3].c_str());
+            ForceTeleport pkt;
+            pkt.target_player_id = target;
+            pkt.x = x; pkt.y = y; pkt.z = z;
+            std::vector<uint8_t> buf = pack(pkt);
+            client_send_reliable(buf.data(), buf.size());
+            append_system_message("Sent teleport to player " + itos(target));
+            return true;
+        }
+        append_system_message("Usage: /tp <id> | /tp <x> <y> <z> | /tp <id> <x> <y> <z>");
+        return true;
+    }
+
+    // /summon <id>  — host only: bring a player to the host's position
+    if (cmd == "summon") {
+        if (!is_host) { append_system_message("/summon is host-only"); return true; }
+        Character* me = game_get_player_character();
+        if (!me) { append_system_message("No local character"); return true; }
+        uint32_t target = (uint32_t)atoi(arg.c_str());
+        if (target == 0) {
+            append_system_message("Usage: /summon <id>");
+            return true;
+        }
+        Ogre::Vector3 p = me->getPosition();
+        ForceTeleport pkt;
+        pkt.target_player_id = target;
+        pkt.x = p.x; pkt.y = p.y; pkt.z = p.z;
+        std::vector<uint8_t> buf = pack(pkt);
+        client_send_reliable(buf.data(), buf.size());
+        append_system_message("Summoning player " + itos(target));
+        return true;
     }
 
     append_system_message("Unknown command: /" + cmd + "  (try /help)");
