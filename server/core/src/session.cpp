@@ -341,6 +341,43 @@ static void handle_npc_packet(ENetPeer* peer, const uint8_t* data, size_t length
     relay_broadcast(peer, data, length, reliable);
 }
 
+// Admin: the host asks the server to move a specific target player. The
+// server validates that the sender is the host, looks up the target peer,
+// and forwards the packet. The target client applies it to its own character.
+static void handle_force_teleport(ENetPeer* peer, const uint8_t* data, size_t length) {
+    auto it = s_peer_to_id.find(peer);
+    if (it == s_peer_to_id.end()) return;
+    if (it->second != s_host_id) {
+        spdlog::warn("FORCE_TELEPORT from non-host player {} ignored", it->second);
+        return;
+    }
+    ForceTeleport ft;
+    if (!unpack(data, length, ft)) return;
+
+    auto target_it = s_sessions.find(ft.target_player_id);
+    if (target_it == s_sessions.end()) {
+        spdlog::warn("FORCE_TELEPORT target {} not found", ft.target_player_id);
+        return;
+    }
+
+    // Just sanity-check for NaN / infinity. Kenshi uses very wide world
+    // coordinates (Y can legitimately be >1500 on tall terrain), so absolute
+    // range clamps would be wrong.
+    auto bad = [](float v) { return !(v == v) || v >  1e7f || v < -1e7f; };
+    if (bad(ft.x) || bad(ft.y) || bad(ft.z)) {
+        spdlog::warn("FORCE_TELEPORT rejected: non-finite coords");
+        return;
+    }
+
+    target_it->second.x = ft.x;
+    target_it->second.y = ft.y;
+    target_it->second.z = ft.z;
+
+    relay_send_to(target_it->second.peer, data, length, true);
+    spdlog::info("Host teleported player {} to ({:.0f}, {:.0f}, {:.0f})",
+        ft.target_player_id, ft.x, ft.y, ft.z);
+}
+
 static void handle_combat_to_host(ENetPeer* peer, const uint8_t* data, size_t length) {
     auto it = s_peer_to_id.find(peer);
     if (it == s_peer_to_id.end()) return;
@@ -402,6 +439,9 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         break;
     case PacketType::COMBAT_TARGET:
         handle_combat_to_host(peer, data, length);
+        break;
+    case PacketType::FORCE_TELEPORT:
+        handle_force_teleport(peer, data, length);
         break;
     default:
         spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header.type));

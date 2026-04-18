@@ -35,6 +35,9 @@ namespace PacketType {
     static const uint8_t SERVER_DESPAWN_NPC      = 0x71;
     static const uint8_t SERVER_SPAWN_BUILDING   = 0x72;
     static const uint8_t SERVER_DESPAWN_BUILDING = 0x73;
+    // Host-originated admin command: move a target player to a location.
+    // Host → server → target-peer; target client applies it to its own char.
+    static const uint8_t FORCE_TELEPORT          = 0x80;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +310,20 @@ struct BuildingDespawnRemote {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::BUILDING_DESPAWN_REMOTE;
+    }
+};
+
+// Admin: force a target player to a position. Sent by host client → server;
+// server forwards to the target peer if the sender is the host.
+struct ForceTeleport {
+    PacketHeader header;
+    uint32_t     target_player_id;
+    float        x, y, z;
+
+    ForceTeleport() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::FORCE_TELEPORT;
     }
 };
 
