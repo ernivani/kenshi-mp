@@ -32,6 +32,19 @@ target_include_directories(test-http-sidecar PRIVATE
 target_link_libraries(test-http-sidecar PRIVATE kenshi-mp-common ws2_32)
 target_compile_features(test-http-sidecar PRIVATE cxx_std_17)
 
+add_executable(test-snapshot-e2e test_snapshot_e2e.cpp)
+target_include_directories(test-snapshot-e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/deps/cpp-httplib
+    ${CMAKE_SOURCE_DIR}/deps/picosha2)
+target_link_libraries(test-snapshot-e2e PRIVATE kenshi-mp-common ws2_32 winmm)
+target_compile_features(test-snapshot-e2e PRIVATE cxx_std_17)
+if(ENET_DIR)
+    target_include_directories(test-snapshot-e2e PRIVATE ${ENET_DIR}/include)
+    target_link_directories(test-snapshot-e2e PRIVATE
+        ${ENET_DIR}/lib ${ENET_DIR}/build/Release ${ENET_DIR}/build/Debug)
+    target_link_libraries(test-snapshot-e2e PRIVATE enet)
+endif()
+
 if(ENET_DIR)
     target_include_directories(test-client PRIVATE ${ENET_DIR}/include)
     target_link_directories(test-client PRIVATE
