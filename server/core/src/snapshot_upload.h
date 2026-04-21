@@ -42,7 +42,6 @@ private:
     mutable std::mutex m_mu;
     bool m_active = false;
     uint32_t m_id = 0;
-    uint32_t m_rev = 0;
     uint64_t m_total_size = 0;
     uint8_t  m_sha[32] = {};
     std::vector<uint8_t> m_buf;

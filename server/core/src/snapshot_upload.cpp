@@ -18,7 +18,6 @@ bool SnapshotUploadSession::on_begin(uint32_t upload_id, uint32_t rev,
     std::lock_guard<std::mutex> lk(m_mu);
     m_active     = true;
     m_id         = upload_id;
-    m_rev        = rev;
     m_total_size = total_size;
     std::memcpy(m_sha, sha256, 32);
     m_buf.assign(static_cast<size_t>(total_size), 0);
