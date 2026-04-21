@@ -21,6 +21,11 @@ target_include_directories(kenshi-mp-server-core
 
 target_link_libraries(kenshi-mp-server-core PRIVATE kenshi-mp-common)
 
+target_include_directories(kenshi-mp-server-core PRIVATE
+    ${CMAKE_SOURCE_DIR}/deps/cpp-httplib
+    ${CMAKE_SOURCE_DIR}/deps/picosha2
+)
+
 if(ENET_DIR)
     target_include_directories(kenshi-mp-server-core PRIVATE ${ENET_DIR}/include)
     target_link_directories(kenshi-mp-server-core PRIVATE
