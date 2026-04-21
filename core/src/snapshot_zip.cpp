@@ -35,12 +35,13 @@ static std::string make_archive_name(const std::wstring& full_w,
                             static_cast<int>(rel_w.size()),
                             &rel[0], needed, nullptr, nullptr);
     }
-    for (auto& c : rel) if (c == '\\') c = '/';
+    for (std::string::size_type i = 0; i < rel.size(); ++i)
+        if (rel[i] == '\\') rel[i] = '/';
     return rel;
 }
 
 static std::wstring utf8_to_wide(const std::string& s) {
-    if (s.empty()) return {};
+    if (s.empty()) return std::wstring();
     int needed = MultiByteToWideChar(CP_UTF8, 0, s.c_str(),
                                      static_cast<int>(s.size()),
                                      nullptr, 0);
@@ -94,34 +95,34 @@ static bool walk(const std::wstring& root_w,
 std::vector<uint8_t> zip_directory(const std::string& abs_path) {
     std::wstring root_w = utf8_to_wide(abs_path);
     while (!root_w.empty() &&
-           (root_w.back() == L'\\' || root_w.back() == L'/')) {
-        root_w.pop_back();
+           (root_w[root_w.size() - 1] == L'\\' || root_w[root_w.size() - 1] == L'/')) {
+        root_w.erase(root_w.size() - 1);
     }
 
     DWORD attrs = GetFileAttributesW(root_w.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES ||
         !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        return {};
+        return std::vector<uint8_t>();
     }
 
     mz_zip_archive zip;
     std::memset(&zip, 0, sizeof(zip));
     if (!mz_zip_writer_init_heap(&zip, 0, 16 * 1024)) {
-        return {};
+        return std::vector<uint8_t>();
     }
 
     bool ok = walk(root_w, root_w, zip);
 
     if (!ok) {
         mz_zip_writer_end(&zip);
-        return {};
+        return std::vector<uint8_t>();
     }
 
-    void* out_ptr = nullptr;
+    void* out_ptr = NULL;
     size_t out_size = 0;
     if (!mz_zip_writer_finalize_heap_archive(&zip, &out_ptr, &out_size)) {
         mz_zip_writer_end(&zip);
-        return {};
+        return std::vector<uint8_t>();
     }
 
     std::vector<uint8_t> result(out_size);

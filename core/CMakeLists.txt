@@ -15,11 +15,14 @@ add_library(KenshiMP SHARED
     src/admin_panel.cpp
     src/ui.cpp
     src/client_identity.cpp
+    src/save_trigger.cpp
     src/snapshot_zip.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
-# miniz
+# miniz — force C language so MSVC generator emits ClCompile, not None
+set_source_files_properties(${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
+    PROPERTIES LANGUAGE C)
 target_include_directories(KenshiMP PRIVATE ${CMAKE_SOURCE_DIR}/deps/miniz)
 
 # KenshiLib PerfTimer.h uses wide-string CreateMutex
@@ -75,4 +78,4 @@ if(ENET_DIR)
 endif()
 
 # Windows libs
-target_link_libraries(KenshiMP PRIVATE ws2_32 winmm)
+target_link_libraries(KenshiMP PRIVATE ws2_32 winmm shell32)
