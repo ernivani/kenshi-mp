@@ -59,7 +59,7 @@ define BANNER
 	@echo "================================================================"
 endef
 
-.PHONY: help all core server-core server-gui build deploy publish run-server clean distclean test
+.PHONY: help all core server-core server-gui build deploy publish run-server clean distclean test test-e2e
 
 help:
 	@echo "KenshiMP v$(VERSION) — available targets:"
@@ -71,7 +71,8 @@ help:
 	@echo "  make deploy        Build and copy binaries into Kenshi mods folder"
 	@echo "  make publish       Produce dist/KenshiMP-v$(VERSION)-windows-x64.zip"
 	@echo "  make run-server    Launch the deployed server GUI"
-	@echo "  make test          Build and run the snapshot test suite"
+	@echo "  make test          Build and run snapshot unit tests"
+	@echo "  make test-e2e      Run the e2e test (needs a running server)"
 	@echo "  make clean         Remove build artifacts"
 	@echo "  make distclean     Clean + remove dist/"
 	@echo ""
@@ -140,21 +141,24 @@ run-server:
 	@cd "$(KENSHI_MOD_DIR)" && ./kenshi-mp-server.exe &
 
 # ---------------------------------------------------------------------------
-# Tests — build and run the snapshot test suite (unit + integration).
-# Skips tests that don't exist yet (missing targets are tolerated).
+# Tests — build and run the snapshot test suite.
+#
+# `test` runs unit tests only (self-contained, no server required).
+# `test-e2e` runs the e2e test that needs a running headless server.
 # ---------------------------------------------------------------------------
-SNAPSHOT_TESTS := test-snapshot-packets test-snapshot-store test-snapshot-upload \
-                  test-http-sidecar test-snapshot-e2e
+SNAPSHOT_UNIT_TESTS := test-snapshot-packets test-snapshot-store \
+                       test-snapshot-upload test-http-sidecar
+SNAPSHOT_E2E_TESTS  := test-snapshot-e2e
 
 test: $(BUILD_SERVER)/CMakeCache.txt
-	$(call BANNER,Build snapshot test suite)
-	@for t in $(SNAPSHOT_TESTS); do \
+	$(call BANNER,Build snapshot unit tests)
+	@for t in $(SNAPSHOT_UNIT_TESTS) $(SNAPSHOT_E2E_TESTS); do \
 		if grep -q "add_executable($$t " tools/CMakeLists.txt; then \
 			"$(CMAKE)" --build "$(BUILD_SERVER)" --config Release --target $$t || exit 1; \
 		fi; \
 	done
-	$(call BANNER,Run snapshot test suite)
-	@for t in $(SNAPSHOT_TESTS); do \
+	$(call BANNER,Run snapshot unit tests)
+	@for t in $(SNAPSHOT_UNIT_TESTS); do \
 		exe="$(BUILD_SERVER)/tools/Release/$$t.exe"; \
 		if [ -x "$$exe" ]; then \
 			echo ""; echo "--- $$t ---"; \
@@ -162,7 +166,18 @@ test: $(BUILD_SERVER)/CMakeCache.txt
 		fi; \
 	done
 	@echo ""
-	@echo "All snapshot tests passed."
+	@echo "All snapshot unit tests passed. (Run 'make test-e2e' for the integration test.)"
+
+test-e2e: test
+	$(call BANNER,Run e2e test against headless server)
+	@echo "Starting headless server in background..."
+	@"$(BUILD_SERVER)/bin/Release/kenshi-mp-server-headless.exe" > /tmp/kmp-e2e-server.log 2>&1 & \
+		SPID=$$!; sleep 2; \
+		"$(BUILD_SERVER)/tools/Release/test-snapshot-e2e.exe"; \
+		EC=$$?; \
+		kill $$SPID 2>/dev/null; \
+		taskkill //F //PID $$SPID 2>/dev/null || true; \
+		exit $$EC
 
 # ---------------------------------------------------------------------------
 # Publish — produce a GitHub release zip

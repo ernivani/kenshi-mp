@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.h"
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -23,13 +23,13 @@ static void test_returns_503_when_empty() {
     SnapshotStore store;
     HttpSidecar sidecar(store);
     bool ok = sidecar.start("127.0.0.1", 17891);
-    assert(ok);
+    KMP_CHECK(ok);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     httplib::Client cli("127.0.0.1", 17891);
     auto res = cli.Get("/snapshot");
-    assert(res);
-    assert(res->status == 503);
+    KMP_CHECK(res);
+    KMP_CHECK(res->status == 503);
 
     sidecar.stop();
     printf("test_returns_503_when_empty OK\n");
@@ -43,16 +43,16 @@ static void test_serves_snapshot() {
     store.set(blob, sha);
 
     HttpSidecar sidecar(store);
-    assert(sidecar.start("127.0.0.1", 17892));
+    KMP_CHECK(sidecar.start("127.0.0.1", 17892));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     httplib::Client cli("127.0.0.1", 17892);
     auto res = cli.Get("/snapshot");
-    assert(res);
-    assert(res->status == 200);
-    assert(res->body.size() == blob.size());
-    assert(std::memcmp(res->body.data(), blob.data(), blob.size()) == 0);
-    assert(res->get_header_value("X-KMP-Snapshot-Rev") == "1");
+    KMP_CHECK(res);
+    KMP_CHECK(res->status == 200);
+    KMP_CHECK(res->body.size() == blob.size());
+    KMP_CHECK(std::memcmp(res->body.data(), blob.data(), blob.size()) == 0);
+    KMP_CHECK(res->get_header_value("X-KMP-Snapshot-Rev") == "1");
 
     sidecar.stop();
     printf("test_serves_snapshot OK\n");
@@ -66,14 +66,14 @@ static void test_if_none_match_returns_304() {
     store.set(blob, sha);
 
     HttpSidecar sidecar(store);
-    assert(sidecar.start("127.0.0.1", 17893));
+    KMP_CHECK(sidecar.start("127.0.0.1", 17893));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     httplib::Client cli("127.0.0.1", 17893);
     httplib::Headers hdrs = {{"If-None-Match", "\"1\""}};
     auto res = cli.Get("/snapshot", hdrs);
-    assert(res);
-    assert(res->status == 304);
+    KMP_CHECK(res);
+    KMP_CHECK(res->status == 304);
 
     sidecar.stop();
     printf("test_if_none_match_returns_304 OK\n");

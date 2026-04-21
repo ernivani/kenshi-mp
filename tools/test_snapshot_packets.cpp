@@ -1,4 +1,4 @@
-#include <cassert>
+#include "test_check.h"
 #include <cstring>
 #include <cstdio>
 #include <vector>
@@ -18,11 +18,11 @@ static void test_upload_begin_roundtrip() {
 
     SnapshotUploadBegin got;
     bool ok = unpack(buf.data(), buf.size(), got);
-    assert(ok);
-    assert(got.upload_id  == 0x12345678);
-    assert(got.rev        == 7);
-    assert(got.total_size == 1024 * 1024);
-    for (int i = 0; i < 32; ++i) assert(got.sha256[i] == static_cast<uint8_t>(i * 3));
+    KMP_CHECK(ok);
+    KMP_CHECK(got.upload_id  == 0x12345678);
+    KMP_CHECK(got.rev        == 7);
+    KMP_CHECK(got.total_size == 1024 * 1024);
+    for (int i = 0; i < 32; ++i) KMP_CHECK(got.sha256[i] == static_cast<uint8_t>(i * 3));
     printf("test_upload_begin_roundtrip OK\n");
 }
 
@@ -41,12 +41,12 @@ static void test_upload_chunk_roundtrip() {
     const uint8_t* tail = nullptr;
     size_t tail_len = 0;
     bool ok = unpack_with_tail(buf.data(), buf.size(), got_hdr, tail, tail_len);
-    assert(ok);
-    assert(got_hdr.upload_id == 99);
-    assert(got_hdr.offset    == 65536);
-    assert(got_hdr.length    == data.size());
-    assert(tail_len == data.size());
-    assert(std::memcmp(tail, data.data(), data.size()) == 0);
+    KMP_CHECK(ok);
+    KMP_CHECK(got_hdr.upload_id == 99);
+    KMP_CHECK(got_hdr.offset    == 65536);
+    KMP_CHECK(got_hdr.length    == data.size());
+    KMP_CHECK(tail_len == data.size());
+    KMP_CHECK(std::memcmp(tail, data.data(), data.size()) == 0);
     printf("test_upload_chunk_roundtrip OK\n");
 }
 
@@ -56,8 +56,8 @@ static void test_upload_end_roundtrip() {
     auto buf = pack(orig);
     SnapshotUploadEnd got;
     bool ok = unpack(buf.data(), buf.size(), got);
-    assert(ok);
-    assert(got.upload_id == 42);
+    KMP_CHECK(ok);
+    KMP_CHECK(got.upload_id == 42);
     printf("test_upload_end_roundtrip OK\n");
 }
 
