@@ -41,6 +41,12 @@ namespace PacketType {
     // Host enumerates its GameData BUILDING entries on connect and streams
     // them to the server so the admin GUI can show a proper dropdown.
     static const uint8_t BUILDING_CATALOG_ENTRY  = 0x90;
+    // Host uploads the current save snapshot to the server. Multi-chunk,
+    // sha256-verified. See docs/superpowers/specs/2026-04-21-save-transfer-and-load-design.md
+    static const uint8_t SNAPSHOT_UPLOAD_BEGIN = 0xA0;
+    static const uint8_t SNAPSHOT_UPLOAD_CHUNK = 0xA1;
+    static const uint8_t SNAPSHOT_UPLOAD_END   = 0xA2;
+    static const uint8_t SNAPSHOT_UPLOAD_ACK   = 0xA3;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +352,60 @@ struct BuildingCatalogEntry {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::BUILDING_CATALOG_ENTRY;
+    }
+};
+
+struct SnapshotUploadBegin {
+    PacketHeader header;
+    uint32_t     upload_id;
+    uint32_t     rev;
+    uint64_t     total_size;
+    uint8_t      sha256[32];
+
+    SnapshotUploadBegin() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SNAPSHOT_UPLOAD_BEGIN;
+    }
+};
+
+// Wire layout: {PacketHeader, upload_id, offset, length}{<length> bytes}.
+// Serialize via pack_with_tail / deserialize via unpack_with_tail.
+struct SnapshotUploadChunk {
+    PacketHeader header;
+    uint32_t     upload_id;
+    uint32_t     offset;
+    uint16_t     length;
+
+    SnapshotUploadChunk() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SNAPSHOT_UPLOAD_CHUNK;
+    }
+};
+
+struct SnapshotUploadEnd {
+    PacketHeader header;
+    uint32_t     upload_id;
+
+    SnapshotUploadEnd() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SNAPSHOT_UPLOAD_END;
+    }
+};
+
+struct SnapshotUploadAck {
+    PacketHeader header;
+    uint32_t     upload_id;
+    uint8_t      accepted;    // 0 = rejected, 1 = accepted
+    uint8_t      error_code;  // 0=none, 1=sha_mismatch, 2=size_mismatch, 3=out_of_order, 4=no_upload
+    uint16_t     _pad;
+
+    SnapshotUploadAck() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SNAPSHOT_UPLOAD_ACK;
     }
 };
 

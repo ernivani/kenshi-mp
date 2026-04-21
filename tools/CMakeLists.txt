@@ -2,6 +2,10 @@ add_executable(test-client test_client.cpp)
 target_compile_features(test-client PRIVATE cxx_std_17)
 target_link_libraries(test-client PRIVATE kenshi-mp-common)
 
+add_executable(test-snapshot-packets test_snapshot_packets.cpp)
+target_compile_features(test-snapshot-packets PRIVATE cxx_std_17)
+target_link_libraries(test-snapshot-packets PRIVATE kenshi-mp-common)
+
 if(ENET_DIR)
     target_include_directories(test-client PRIVATE ${ENET_DIR}/include)
     target_link_directories(test-client PRIVATE
