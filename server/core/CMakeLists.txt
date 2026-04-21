@@ -6,6 +6,7 @@ add_library(kenshi-mp-server-core SHARED
     src/session.cpp
     src/snapshot.cpp
     src/snapshot_upload.cpp
+    src/http_sidecar.cpp
     src/world_state.cpp
     src/relay.cpp
     src/server_config.cpp

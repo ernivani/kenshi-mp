@@ -25,6 +25,8 @@
 #include "server_config.h"
 #include "session_api.h"
 #include "spawn.h"
+#include "snapshot.h"
+#include "http_sidecar.h"
 
 namespace kmp {
     void session_init();
@@ -87,6 +89,8 @@ static std::atomic<bool>    g_running{false};
 static ENetHost*            g_host = nullptr;
 static std::chrono::steady_clock::time_point g_start_time;
 static volatile bool        g_run_flag = false;     // watched by admin_request_shutdown
+static std::unique_ptr<kmp::SnapshotStore> g_snapshot_store;
+static std::unique_ptr<kmp::HttpSidecar>   g_http_sidecar;
 
 static void worker_main(kmp::ServerConfig cfg) {
     ENetAddress address;
@@ -102,6 +106,22 @@ static void worker_main(kmp::ServerConfig cfg) {
 
     kmp::world_state_init();
     kmp::session_init();
+
+    // Snapshot store + HTTP sidecar. The store is in-RAM; the sidecar binds
+    // port+1 on a worker thread and serves GET /snapshot to joiners.
+    g_snapshot_store = std::make_unique<kmp::SnapshotStore>();
+    kmp::session_bind_snapshot_store(g_snapshot_store.get());
+
+    g_http_sidecar = std::make_unique<kmp::HttpSidecar>(*g_snapshot_store);
+    uint16_t http_port = static_cast<uint16_t>(cfg.port + 1);
+    if (!g_http_sidecar->start("0.0.0.0", http_port)) {
+        spdlog::error("Failed to bind HTTP sidecar on port {} (in use?)", http_port);
+        g_http_sidecar.reset();
+        // Server continues — snapshot transfer unavailable but relay still works.
+    } else {
+        spdlog::info("HTTP sidecar listening on 0.0.0.0:{}", http_port);
+    }
+
     kmp::relay_init(g_host);
     kmp::admin_set_running_flag(&g_run_flag);
     g_run_flag = true;
@@ -140,6 +160,9 @@ static void worker_main(kmp::ServerConfig cfg) {
     }
 
     spdlog::info("Server stopping...");
+    if (g_http_sidecar) { g_http_sidecar->stop(); g_http_sidecar.reset(); }
+    kmp::session_bind_snapshot_store(nullptr);
+    g_snapshot_store.reset();
     enet_host_destroy(g_host);
     g_host = nullptr;
     g_running = false;
