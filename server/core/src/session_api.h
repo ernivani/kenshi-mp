@@ -9,6 +9,9 @@ typedef struct _ENetPeer ENetPeer;
 
 namespace kmp {
 
+class SnapshotStore;
+void         session_bind_snapshot_store(SnapshotStore* store);
+
 struct PlayerInfo {
     uint32_t    id;
     std::string name;

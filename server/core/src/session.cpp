@@ -7,6 +7,7 @@
 #include <deque>
 #include <chrono>
 #include <cstring>
+#include <memory>
 #include <vector>
 #include <string>
 
@@ -20,6 +21,8 @@
 #include "session_api.h"
 #include "events.h"
 #include "spawn.h"
+#include "snapshot.h"
+#include "snapshot_upload.h"
 
 namespace kmp {
 
@@ -71,6 +74,12 @@ static std::deque<PostureTransition> s_posture_log;
 // Player ids whose next leave announce should be suppressed (set by admin_kick).
 static std::set<uint32_t> s_suppress_leave;
 
+// Snapshot upload session — reassembles the host's SNAPSHOT_UPLOAD_* stream
+// and commits completed uploads to the shared SnapshotStore. Bound via
+// session_bind_snapshot_store() from core.cpp at startup.
+static SnapshotStore*                           s_snapshot_store = nullptr;
+static std::unique_ptr<SnapshotUploadSession>   s_snapshot_session;
+
 static uint64_t now_wall_ms() {
     using namespace std::chrono;
     return static_cast<uint64_t>(
@@ -84,6 +93,11 @@ void session_init() {
     s_sessions.clear();
     s_peer_to_id.clear();
     s_next_id = 1;
+}
+
+void session_bind_snapshot_store(SnapshotStore* store) {
+    s_snapshot_store = store;
+    s_snapshot_session.reset(store ? new SnapshotUploadSession(*store) : nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +522,60 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
             if (s_building_catalog[i].stringID == row.stringID) { exists = true; break; }
         }
         if (!exists) s_building_catalog.push_back(std::move(row));
+        break;
+    }
+    case PacketType::SNAPSHOT_UPLOAD_BEGIN: {
+        SnapshotUploadBegin pkt;
+        if (!unpack(data, length, pkt)) break;
+        if (!s_snapshot_session) break;
+        bool ok = s_snapshot_session->on_begin(pkt.upload_id, pkt.rev,
+                                               pkt.total_size, pkt.sha256);
+        if (!ok) {
+            SnapshotUploadAck ack;
+            ack.upload_id  = pkt.upload_id;
+            ack.accepted   = 0;
+            ack.error_code = 2;  // size out of range
+            auto buf = pack(ack);
+            relay_send_to(peer, buf.data(), buf.size(), true);
+            spdlog::warn("SNAPSHOT_UPLOAD_BEGIN rejected (size out of range)");
+        } else {
+            spdlog::info("SNAPSHOT_UPLOAD_BEGIN id={} size={} rev={}",
+                pkt.upload_id, pkt.total_size, pkt.rev);
+        }
+        break;
+    }
+    case PacketType::SNAPSHOT_UPLOAD_CHUNK: {
+        SnapshotUploadChunk hdr;
+        const uint8_t* tail = nullptr;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, hdr, tail, tail_len)) break;
+        if (!s_snapshot_session) break;
+        if (tail_len < hdr.length) break;  // truncated
+        s_snapshot_session->on_chunk(hdr.upload_id, hdr.offset, tail, hdr.length);
+        break;
+    }
+    case PacketType::SNAPSHOT_UPLOAD_END: {
+        SnapshotUploadEnd pkt;
+        if (!unpack(data, length, pkt)) break;
+        if (!s_snapshot_session) break;
+        SnapshotUploadResult res = s_snapshot_session->on_end(pkt.upload_id);
+        SnapshotUploadAck ack;
+        ack.upload_id = pkt.upload_id;
+        ack.accepted  = (res == SnapshotUploadResult::Committed) ? 1 : 0;
+        switch (res) {
+            case SnapshotUploadResult::Committed:      ack.error_code = 0; break;
+            case SnapshotUploadResult::ShaMismatch:    ack.error_code = 1; break;
+            case SnapshotUploadResult::SizeMismatch:   ack.error_code = 2; break;
+            case SnapshotUploadResult::NoUpload:       ack.error_code = 4; break;
+        }
+        auto buf = pack(ack);
+        relay_send_to(peer, buf.data(), buf.size(), true);
+        if (res == SnapshotUploadResult::Committed) {
+            spdlog::info("Snapshot upload committed; store rev={}",
+                         s_snapshot_store ? s_snapshot_store->rev() : 0u);
+        } else {
+            spdlog::warn("Snapshot upload rejected: err={}", ack.error_code);
+        }
         break;
     }
     default:
