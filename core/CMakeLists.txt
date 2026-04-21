@@ -15,7 +15,12 @@ add_library(KenshiMP SHARED
     src/admin_panel.cpp
     src/ui.cpp
     src/client_identity.cpp
+    src/snapshot_zip.cpp
+    ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
+
+# miniz
+target_include_directories(KenshiMP PRIVATE ${CMAKE_SOURCE_DIR}/deps/miniz)
 
 # KenshiLib PerfTimer.h uses wide-string CreateMutex
 target_compile_definitions(KenshiMP PRIVATE UNICODE _UNICODE)

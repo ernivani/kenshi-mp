@@ -147,7 +147,8 @@ run-server:
 # `test-e2e` runs the e2e test that needs a running headless server.
 # ---------------------------------------------------------------------------
 SNAPSHOT_UNIT_TESTS := test-snapshot-packets test-snapshot-store \
-                       test-snapshot-upload test-http-sidecar
+                       test-snapshot-upload test-http-sidecar \
+                       test-snapshot-zip
 SNAPSHOT_E2E_TESTS  := test-snapshot-e2e
 
 test: $(BUILD_SERVER)/CMakeCache.txt

@@ -22,6 +22,16 @@ target_include_directories(test-snapshot-upload PRIVATE
 target_link_libraries(test-snapshot-upload PRIVATE kenshi-mp-common)
 target_compile_features(test-snapshot-upload PRIVATE cxx_std_17)
 
+set_source_files_properties(${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c PROPERTIES LANGUAGE C)
+add_executable(test-snapshot-zip test_snapshot_zip.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_zip.cpp
+    ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c)
+target_include_directories(test-snapshot-zip PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/deps/miniz)
+target_link_libraries(test-snapshot-zip PRIVATE kenshi-mp-common)
+target_compile_features(test-snapshot-zip PRIVATE cxx_std_17)
+
 add_executable(test-http-sidecar test_http_sidecar.cpp
     ${CMAKE_SOURCE_DIR}/server/core/src/snapshot.cpp
     ${CMAKE_SOURCE_DIR}/server/core/src/http_sidecar.cpp)
