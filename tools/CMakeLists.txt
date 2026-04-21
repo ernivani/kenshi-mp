@@ -6,6 +6,13 @@ add_executable(test-snapshot-packets test_snapshot_packets.cpp)
 target_compile_features(test-snapshot-packets PRIVATE cxx_std_17)
 target_link_libraries(test-snapshot-packets PRIVATE kenshi-mp-common)
 
+add_executable(test-snapshot-store test_snapshot_store.cpp
+    ${CMAKE_SOURCE_DIR}/server/core/src/snapshot.cpp)
+target_include_directories(test-snapshot-store PRIVATE
+    ${CMAKE_SOURCE_DIR}/server/core/src)
+target_link_libraries(test-snapshot-store PRIVATE kenshi-mp-common)
+target_compile_features(test-snapshot-store PRIVATE cxx_std_17)
+
 if(ENET_DIR)
     target_include_directories(test-client PRIVATE ${ENET_DIR}/include)
     target_link_directories(test-client PRIVATE
