@@ -125,11 +125,12 @@ public sealed class ServerCore : IDisposable
 
     // --- Spawn -----------------------------------------------------------------
     public uint SpawnNpc(string name, string race, string weapon, string armour,
-                         float x, float y, float z, float yaw)
+                         float x, float y, float z, float yaw, bool enableAi)
     {
         var r = new NativeMethods.kmp_npc_spawn_request {
             name = name ?? "", race = race ?? "", weapon = weapon ?? "", armour = armour ?? "",
             x = x, y = y, z = z, yaw = yaw,
+            enable_ai = (byte)(enableAi ? 1 : 0),
         };
         return NativeMethods.kmp_spawn_npc(ref r);
     }
@@ -157,6 +158,15 @@ public sealed class ServerCore : IDisposable
         var buf = new NativeMethods.kmp_npc_spawned[max];
         uint n = NativeMethods.kmp_list_spawned_npcs(buf, max);
         var list = new List<NativeMethods.kmp_npc_spawned>((int)n);
+        for (uint i = 0; i < n; ++i) list.Add(buf[i]);
+        return list;
+    }
+
+    public IReadOnlyList<NativeMethods.kmp_building_catalog_item> ListBuildingCatalog(uint max = 4096)
+    {
+        var buf = new NativeMethods.kmp_building_catalog_item[max];
+        uint n = NativeMethods.kmp_list_building_catalog(buf, max);
+        var list = new List<NativeMethods.kmp_building_catalog_item>((int)n);
         for (uint i = 0; i < n; ++i) list.Add(buf[i]);
         return list;
     }

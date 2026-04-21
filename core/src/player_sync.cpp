@@ -93,6 +93,7 @@ extern void ui_on_chat(const ChatMessage& pkt);
 extern void ui_on_connect_accept(uint32_t player_id);
 extern void ui_on_disconnect();
 extern void ui_check_hotkey();
+extern void ui_update_main_menu_button();
 
 // ---------------------------------------------------------------------------
 // State
@@ -421,6 +422,7 @@ void player_sync_tick(float dt) {
 
     // Always check for hotkeys
     ui_check_hotkey();
+    ui_update_main_menu_button();
     admin_panel_check_hotkey();
     admin_panel_update(dt);
 

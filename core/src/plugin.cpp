@@ -23,6 +23,7 @@ namespace kmp {
     void npc_manager_shutdown();
     void ui_init();
     void ui_shutdown();
+    void ui_update_main_menu_button();
 }
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,26 @@ namespace kmp {
 // ---------------------------------------------------------------------------
 static void (*s_original_main_loop)(GameWorld* world, float time) = NULL;
 static bool s_subsystems_initialized = false;
+
+// Separate hook for TitleScreen::update — the main game-loop hook doesn't fire
+// until a GameWorld exists, so we'd never get a chance to attach UI to the
+// title screen otherwise. Running on the render thread, MyGUI calls are safe.
+static void (*s_original_title_update)(void* self) = NULL;
+static bool s_title_ui_inited = false;
+
+static void hooked_title_update(void* self) {
+    if (s_original_title_update) s_original_title_update(self);
+
+    // MyGUI is ready by the time TitleScreen::update runs. Init only the UI
+    // subsystem here — client/npc_manager/player_sync are in-game-only and
+    // would try to touch the world which doesn't exist yet.
+    if (!s_title_ui_inited) {
+        s_title_ui_inited = true;
+        KMP_LOG("[KenshiMP] Title screen detected; initialising menu UI...");
+        kmp::ui_init();
+    }
+    kmp::ui_update_main_menu_button();
+}
 
 static void hooked_main_loop(GameWorld* world, float time) {
     // Call original game logic first
@@ -44,7 +65,9 @@ static void hooked_main_loop(GameWorld* world, float time) {
         kmp::client_init();
         kmp::npc_manager_init();
         kmp::player_sync_init();
-        kmp::ui_init();
+        // ui_init may have already run from the TitleScreen hook — it's a
+        // no-op when s_ui_initialized is true (see ui.cpp).
+        if (!s_title_ui_inited) kmp::ui_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 
@@ -86,6 +109,27 @@ __declspec(dllexport) void startPlugin() {
             "[KenshiMP] FATAL: Failed to hook game loop!"
         );
         return;
+    }
+
+    // Second hook: TitleScreen::update — runs every frame on the main menu,
+    // before any GameWorld exists. Gives us a tick source to attach and drive
+    // menu UI (the "Multiplayer" button).
+    void* ts_stub = (void*)GetProcAddress(klib,
+        "?update@TitleScreen@@UEAAXXZ");
+    if (ts_stub) {
+        intptr_t ts_addr = KenshiLib::GetRealAddress(ts_stub);
+        KenshiLib::HookStatus ts_status = KenshiLib::AddHook(
+            ts_addr,
+            &hooked_title_update,
+            &s_original_title_update
+        );
+        if (ts_status != KenshiLib::SUCCESS) {
+            KMP_LOG("[KenshiMP] Warning: failed to hook TitleScreen::update (menu UI unavailable)");
+        } else {
+            KMP_LOG("[KenshiMP] Hooked TitleScreen::update");
+        }
+    } else {
+        KMP_LOG("[KenshiMP] Warning: TitleScreen::update symbol not found");
     }
 
     KMP_LOG("[KenshiMP] Plugin loaded OK (game loop hooked)");

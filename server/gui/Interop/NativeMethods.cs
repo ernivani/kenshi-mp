@@ -149,6 +149,7 @@ public static class NativeMethods
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string weapon;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string armour;
         public float x, y, z, yaw;
+        public byte  enable_ai;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1, CharSet = CharSet.Ansi)]
@@ -200,6 +201,16 @@ public static class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint kmp_list_spawned_buildings([Out] kmp_building_spawned[] outArr, uint max);
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1, CharSet = CharSet.Ansi)]
+    public struct kmp_building_catalog_item
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string stringID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string name;
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint kmp_list_building_catalog([Out] kmp_building_catalog_item[] outArr, uint max);
 }
 
 // Posture flag constants (mirror of packets.h POSTURE_*).

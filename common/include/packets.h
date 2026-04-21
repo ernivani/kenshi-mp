@@ -38,6 +38,9 @@ namespace PacketType {
     // Host-originated admin command: move a target player to a location.
     // Host → server → target-peer; target client applies it to its own char.
     static const uint8_t FORCE_TELEPORT          = 0x80;
+    // Host enumerates its GameData BUILDING entries on connect and streams
+    // them to the server so the admin GUI can show a proper dropdown.
+    static const uint8_t BUILDING_CATALOG_ENTRY  = 0x90;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +182,11 @@ struct PongPacket {
     }
 };
 
+// Spawn flag bits. Currently only used for SERVER_SPAWN_NPC (from admin GUI);
+// host→joiner sync leaves spawn_flags = 0 which keeps the legacy "AI cleared"
+// behaviour (the receiver calls neutralize_remote_avatar).
+static const uint8_t NPC_SPAWN_FLAG_ENABLE_AI = 0x01;
+
 struct NPCSpawnRemote {
     PacketHeader header;
     uint32_t     npc_id;
@@ -188,6 +196,7 @@ struct NPCSpawnRemote {
     char         armour[MAX_ARMOUR_LENGTH];
     float        x, y, z;
     float        yaw;
+    uint8_t      spawn_flags;
 
     NPCSpawnRemote() {
         std::memset(this, 0, sizeof(*this));
@@ -324,6 +333,19 @@ struct ForceTeleport {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::FORCE_TELEPORT;
+    }
+};
+
+// One entry in the host's GameData building catalog.
+struct BuildingCatalogEntry {
+    PacketHeader header;
+    char         stringID[64];
+    char         name[64];
+
+    BuildingCatalogEntry() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::BUILDING_CATALOG_ENTRY;
     }
 };
 

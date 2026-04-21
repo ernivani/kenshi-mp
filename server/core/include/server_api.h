@@ -68,6 +68,7 @@ typedef struct {
     char     armour[64];
     float    x, y, z;
     float    yaw;
+    uint8_t  enable_ai;   // 0 = no AI (default), 1 = let faction AI run
 } kmp_npc_spawn_request;
 
 typedef struct {
@@ -174,6 +175,13 @@ KMP_API int32_t  KMP_CALL kmp_despawn_building(uint32_t id);
 // written (so callers can size the buffer first).
 KMP_API uint32_t KMP_CALL kmp_list_spawned_npcs(kmp_npc_spawned* out, uint32_t max);
 KMP_API uint32_t KMP_CALL kmp_list_spawned_buildings(kmp_building_spawned* out, uint32_t max);
+
+// Host-published building catalog. `out` may be NULL for a size probe.
+typedef struct {
+    char stringID[64];
+    char name[64];
+} kmp_building_catalog_item;
+KMP_API uint32_t KMP_CALL kmp_list_building_catalog(kmp_building_catalog_item* out, uint32_t max);
 
 // ---------------------------------------------------------------------------
 // Config persistence

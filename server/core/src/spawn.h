@@ -13,6 +13,7 @@ struct SpawnedNPC {
     std::string weapon;
     std::string armour;
     float x, y, z, yaw;
+    bool  enable_ai;
 };
 
 struct SpawnedBuilding {
@@ -31,6 +32,7 @@ struct NPCSpawnRequest {
     std::string weapon;
     std::string armour;
     float x, y, z, yaw;
+    bool  enable_ai;   // default false — NPC stands still
 };
 
 struct BuildingSpawnRequest {

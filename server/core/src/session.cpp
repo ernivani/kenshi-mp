@@ -19,6 +19,7 @@
 #include "posture.h"
 #include "session_api.h"
 #include "events.h"
+#include "spawn.h"
 
 namespace kmp {
 
@@ -52,6 +53,14 @@ static std::map<ENetPeer*, uint32_t>       s_peer_to_id;      // peer -> id
 static std::map<std::string, uint32_t>     s_uuid_to_id;      // stable identity
 static uint32_t s_next_id = 1;
 static uint32_t s_host_id = 0;  // player ID of the host (0 = no host)
+
+// Host-published building catalog. Host streams it on connect; GUI queries it
+// via the C ABI to populate the Spawn tab's building dropdown.
+struct BuildingCatalogRow {
+    std::string stringID;
+    std::string name;
+};
+static std::vector<BuildingCatalogRow> s_building_catalog;
 
 // Chat + posture log rings (GUI panes consume these).
 static constexpr size_t CHAT_RING_MAX     = 512;
@@ -96,6 +105,7 @@ void session_on_disconnect(ENetPeer* peer) {
     uint32_t id = it->second;
     if (s_host_id == id) {
         s_host_id = 0;
+        s_building_catalog.clear();  // catalog was host-owned
         spdlog::info("Host player disconnected");
     }
     std::string left_name = s_sessions[id].name;
@@ -225,6 +235,47 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     relay_broadcast(peer, buf_spawn.data(), buf_spawn.size(), true);
 
     world_state_add_player(id, session.name, session.model);
+
+    // Replay server-spawned NPCs and buildings so the joiner — whose local
+    // world has been wiped — sees what the host/admin already placed.
+    {
+        std::vector<SpawnedNPC> npcs;
+        spawned_npcs(npcs);
+        for (const auto& s : npcs) {
+            NPCSpawnRemote pkt;
+            pkt.header.type = PacketType::SERVER_SPAWN_NPC;
+            pkt.npc_id = s.id;
+            safe_strcpy(pkt.name,   s.name.c_str());
+            safe_strcpy(pkt.race,   s.race.c_str());
+            safe_strcpy(pkt.weapon, s.weapon.c_str());
+            safe_strcpy(pkt.armour, s.armour.c_str());
+            pkt.x = s.x; pkt.y = s.y; pkt.z = s.z; pkt.yaw = s.yaw;
+            pkt.spawn_flags = s.enable_ai ? NPC_SPAWN_FLAG_ENABLE_AI : 0;
+            auto pbuf = pack(pkt);
+            relay_send_to(peer, pbuf.data(), pbuf.size(), true);
+        }
+
+        std::vector<SpawnedBuilding> bldgs;
+        spawned_buildings(bldgs);
+        for (const auto& b : bldgs) {
+            BuildingSpawnRemote pkt;
+            pkt.header.type = PacketType::SERVER_SPAWN_BUILDING;
+            pkt.building_id = b.id;
+            safe_strcpy(pkt.stringID, b.stringID.c_str());
+            pkt.x = b.x; pkt.y = b.y; pkt.z = b.z;
+            pkt.qw = b.qw; pkt.qx = b.qx; pkt.qy = b.qy; pkt.qz = b.qz;
+            pkt.completed  = b.completed  ? 1 : 0;
+            pkt.is_foliage = b.is_foliage ? 1 : 0;
+            pkt.floor      = b.floor;
+            auto pbuf = pack(pkt);
+            relay_send_to(peer, pbuf.data(), pbuf.size(), true);
+        }
+
+        if (!npcs.empty() || !bldgs.empty()) {
+            spdlog::info("Replayed {} NPCs and {} buildings to joiner {}",
+                npcs.size(), bldgs.size(), id);
+        }
+    }
 
     // Announce the join in chat so every client (and the server GUI) sees it.
     {
@@ -443,6 +494,22 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     case PacketType::FORCE_TELEPORT:
         handle_force_teleport(peer, data, length);
         break;
+    case PacketType::BUILDING_CATALOG_ENTRY: {
+        auto it2 = s_peer_to_id.find(peer);
+        if (it2 == s_peer_to_id.end() || it2->second != s_host_id) break;
+        BuildingCatalogEntry e;
+        if (!unpack(data, length, e)) break;
+        BuildingCatalogRow row;
+        row.stringID = e.stringID;
+        row.name     = e.name;
+        // Dedup: a single host may resend the catalog if it reconnects.
+        bool exists = false;
+        for (size_t i = 0; i < s_building_catalog.size(); ++i) {
+            if (s_building_catalog[i].stringID == row.stringID) { exists = true; break; }
+        }
+        if (!exists) s_building_catalog.push_back(std::move(row));
+        break;
+    }
     default:
         spdlog::warn("Unknown packet type: 0x{:02x}", static_cast<uint8_t>(header.type));
         break;
@@ -557,6 +624,17 @@ void session_chat_snapshot(std::vector<ChatLogEntry>& out) {
 
 void session_posture_snapshot(std::vector<PostureTransition>& out) {
     out.assign(s_posture_log.begin(), s_posture_log.end());
+}
+
+void session_building_catalog_snapshot(std::vector<BuildingCatalogItem>& out) {
+    out.clear();
+    out.reserve(s_building_catalog.size());
+    for (auto& r : s_building_catalog) {
+        BuildingCatalogItem b;
+        b.stringID = r.stringID;
+        b.name     = r.name;
+        out.push_back(std::move(b));
+    }
 }
 
 } // namespace kmp

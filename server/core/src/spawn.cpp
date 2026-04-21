@@ -35,6 +35,7 @@ uint32_t spawn_npc(const NPCSpawnRequest& req) {
     safe_strcpy(pkt.weapon, req.weapon.c_str());
     safe_strcpy(pkt.armour, req.armour.c_str());
     pkt.x = req.x; pkt.y = req.y; pkt.z = req.z; pkt.yaw = req.yaw;
+    pkt.spawn_flags = req.enable_ai ? NPC_SPAWN_FLAG_ENABLE_AI : 0;
 
     auto buf = pack(pkt);
     relay_broadcast(nullptr, buf.data(), buf.size(), true);
@@ -44,6 +45,7 @@ uint32_t spawn_npc(const NPCSpawnRequest& req) {
     s.name = req.name; s.race = req.race;
     s.weapon = req.weapon; s.armour = req.armour;
     s.x = req.x; s.y = req.y; s.z = req.z; s.yaw = req.yaw;
+    s.enable_ai = req.enable_ai;
     {
         std::lock_guard<std::mutex> lk(s_mu);
         s_npcs[id] = s;

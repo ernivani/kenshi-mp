@@ -52,4 +52,11 @@ struct PostureTransition {
 };
 void         session_posture_snapshot(std::vector<PostureTransition>& out);
 
+// Host-published building catalog (populated on host connect).
+struct BuildingCatalogItem {
+    std::string stringID;
+    std::string name;
+};
+void         session_building_catalog_snapshot(std::vector<BuildingCatalogItem>& out);
+
 } // namespace kmp

@@ -203,29 +203,55 @@ void building_manager_on_remote_spawn(const BuildingSpawnRemote& pkt) {
     GameData* gd = it->second;
 
     Ogre::Vector3 pos(pkt.x, pkt.y, pkt.z);
-    Ogre::Quaternion rot(pkt.qw, pkt.qx, pkt.qy, pkt.qz);
+    float qlen2 = pkt.qw*pkt.qw + pkt.qx*pkt.qx + pkt.qy*pkt.qy + pkt.qz*pkt.qz;
+    Ogre::Quaternion rot = (qlen2 < 1e-6f)
+        ? Ogre::Quaternion::IDENTITY
+        : Ogre::Quaternion(pkt.qw, pkt.qx, pkt.qy, pkt.qz);
 
-    // Faction = NULL: let the game default it. We can refine later
-    // (e.g. mirror the host player's faction) once we sync faction info.
-    Faction* faction = NULL;
+    // Some specialised building types (Farm, Turret, Crafting, ...) refuse
+    // to construct without an owner Faction. Try NULL first (keeps "not
+    // player-owned"); if that fails fall back to a neutral faction; last
+    // resort is the player faction so at least *something* spawns.
+    auto try_create = [&](Faction* owner) -> Building* {
+        return ou->theFactory->createBuilding(
+            gd, pos, NULL, owner, rot,
+            NULL, NULL, NULL, NULL, NULL,
+            false,
+            pkt.completed != 0,
+            pkt.is_foliage != 0,
+            static_cast<int>(pkt.floor),
+            false);
+    };
 
-    Building* b = ou->theFactory->createBuilding(
-        gd, pos, NULL, faction, rot,
-        NULL,           // FactoryCallbackInterface
-        NULL,           // Layout (furnitureOf)
-        NULL,           // isDoorOf
-        NULL,           // GameSaveState
-        NULL,           // isIndoorsOf
-        false,          // invisible
-        pkt.completed != 0,
-        pkt.is_foliage != 0,
-        static_cast<int>(pkt.floor),
-        false           // isOutsideFurniture
-    );
+    Faction* neutral = NULL;
+    if (ou->factionMgr) {
+        const char* try_names[] = { "Wanderers", "Drifters", "Wilderness", "neutral", NULL };
+        for (int i = 0; try_names[i] && !neutral; ++i) {
+            neutral = ou->factionMgr->getFactionByName(std::string(try_names[i]));
+            if (!neutral) neutral = ou->factionMgr->getFactionByStringID(std::string(try_names[i]));
+        }
+    }
+
+    Building* b = try_create(NULL);
+    if (!b && neutral) { b = try_create(neutral); }
+    if (!b && ou->player) { b = try_create(ou->player->getFaction()); }
 
     if (!b) {
-        KMP_LOG("[KenshiMP] Building spawn: createBuilding returned NULL for sid='" + sid + "'");
+        KMP_LOG("[KenshiMP] Building spawn: createBuilding returned NULL for sid='" + sid + "' (tried NULL, neutral, player factions)");
         return;
+    }
+
+    b->setVisible(true);
+
+    // Only build the physical representation if the constructor didn't already
+    // — blindly calling createPhysical() a second time has crashed the game.
+    // isPhysical() on the Building tells us the current state.
+    if (!b->_NV_isPhysical()) {
+        b->_NV_createPhysical();
+    }
+    b->notifyChange();
+    if (pkt.completed != 0) {
+        b->_NV_notifyConstructionComplete();
     }
 
     s_remote_buildings[pkt.building_id] = b;

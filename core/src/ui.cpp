@@ -19,7 +19,16 @@
 #include <OgreVector3.h>
 #include <OgreQuaternion.h>
 #include <kenshi/Character.h>
+#include <kenshi/gui/GUIWindow.h>
 #include "kmp_log.h"
+
+// Forward-declare TitleScreen. Can't include <kenshi/gui/TitleScreen.h>
+// directly because it redefines GUIWindow inline, colliding with GUIWindow.h
+// when both get pulled in via other headers.
+class TitleScreen : public GUIWindow {
+public:
+    static TitleScreen* getSingleton();
+};
 
 #include "packets.h"
 #include "protocol.h"
@@ -68,6 +77,9 @@ static MyGUI::Button*   s_chat_send_btn  = NULL;
 
 static MyGUI::TextBox*  s_status_text    = NULL;
 
+// Main-menu "Multiplayer" button — attached lazily once TitleScreen exists.
+static MyGUI::Button*   s_mp_menu_btn    = NULL;
+
 // Chat log
 struct ChatEntry {
     std::string sender;
@@ -81,6 +93,7 @@ static std::vector<ChatEntry> s_chat_log;
 static void on_host_clicked(MyGUI::Widget* sender);
 static void on_join_clicked(MyGUI::Widget* sender);
 static void on_disconnect_clicked(MyGUI::Widget* sender);
+static void on_mp_menu_clicked(MyGUI::Widget* sender);
 static void on_chat_send_clicked(MyGUI::Widget* sender);
 static void on_chat_key_press(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::Char ch);
 static void on_chat_window_button(MyGUI::Window* sender, const std::string& name);
@@ -320,6 +333,74 @@ void ui_toggle() {
 // ---------------------------------------------------------------------------
 // Check for F8 key press — call this from player_sync_tick or game hook
 // ---------------------------------------------------------------------------
+// Lazily attach a "Multiplayer" button to the main menu (TitleScreen) once it
+// exists. The singleton isn't available at plugin load, so we poll each tick
+// until it is, then create the button once. Visibility mirrors TitleScreen.
+void ui_update_main_menu_button() {
+    if (!s_ui_initialized) return;
+
+    // Called from the TitleScreen::update hook — if we're here, the title
+    // screen is on screen by definition, so the button should be visible.
+    // When a game loads, TitleScreen::update stops firing and the in-game
+    // hook (see below) hides the button instead.
+    if (s_mp_menu_btn) {
+        if (!s_mp_menu_btn->getVisible()) s_mp_menu_btn->setVisible(true);
+        return;
+    }
+
+    TitleScreen* ts = TitleScreen::getSingleton();
+    static int s_warn_counter = 0;
+    if (!ts) {
+        if ((s_warn_counter++ % 240) == 0)
+            KMP_LOG("[KenshiMP] menu-btn: TitleScreen::getSingleton()==null");
+        return;
+    }
+
+    // TitleScreen inherits from both GUIWindow and wraps::BaseLayout. Its
+    // menu layout populates BaseLayout::mMainWidget — GUIWindow::win (what
+    // getWidget() returns) is never set. Layout per TitleScreen.h:
+    //   GUIWindow  at offset 0x00, length 0x30
+    //   BaseLayout at offset 0x30 (vtable 0x30, mMainWidget at 0x38)
+    MyGUI::Widget* parent = *reinterpret_cast<MyGUI::Widget**>(
+        reinterpret_cast<uint8_t*>(ts) + 0x38);
+    if (!parent) {
+        if ((s_warn_counter++ % 240) == 0)
+            KMP_LOG("[KenshiMP] menu-btn: mMainWidget null");
+        return;
+    }
+
+    // Parent coord tells us where the title menu lives on screen.
+    MyGUI::IntCoord pc = parent->getCoord();
+    {
+        std::ostringstream dss;
+        dss << "[KenshiMP] menu-btn: TitleScreen widget coord="
+            << pc.left << "," << pc.top << " " << pc.width << "x" << pc.height;
+        KMP_LOG(dss.str());
+    }
+
+    try {
+        s_mp_menu_btn = parent->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(20, pc.height - 70, 220, 50),
+            MyGUI::Align::Left | MyGUI::Align::Bottom,
+            "KMP_MultiplayerBtn"
+        );
+        s_mp_menu_btn->setCaption("Multiplayer");
+        s_mp_menu_btn->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_mp_menu_btn->setTextAlign(MyGUI::Align::Center);
+        s_mp_menu_btn->setVisible(true);
+        s_mp_menu_btn->eventMouseButtonClick += MyGUI::newDelegate(on_mp_menu_clicked);
+        KMP_LOG("[KenshiMP] Main-menu Multiplayer button attached as child of TitleScreen");
+    } catch (std::exception& e) {
+        KMP_LOG(std::string("[KenshiMP] menu-btn: createWidget threw: ") + e.what());
+        s_mp_menu_btn = NULL;
+    } catch (...) {
+        KMP_LOG("[KenshiMP] menu-btn: createWidget threw unknown");
+        s_mp_menu_btn = NULL;
+    }
+}
+
+
 void ui_check_hotkey() {
     // F8: toggle the connect dialog.
     // Note: F8 is also Kenshi's screenshot key — move this to a free key
@@ -514,6 +595,14 @@ static void do_connect(bool as_host) {
     }
 }
 
+static void on_mp_menu_clicked(MyGUI::Widget* sender) {
+    if (!s_connect_window) return;
+    // Bring the connect dialog up on top of the title screen.
+    s_ui_visible = true;
+    s_connect_window->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(s_connect_window);
+}
+
 static void on_host_clicked(MyGUI::Widget* sender) {
     do_connect(true);
 }
@@ -587,11 +676,14 @@ static bool handle_chat_command(const std::string& text) {
     const bool is_host = host_sync_is_host();
 
     if (cmd == "help") {
-        append_system_message("Common: /help /clear /who /close /pos");
-        append_system_message("Tp:     /tp <id> | /tp <x> <y> <z>");
         if (is_host) {
-            append_system_message("Host:   /players /summon <id>");
-            append_system_message("Host:   /tp <id> <x> <y> <z>   (move a player)");
+            append_system_message("Common:  /help /clear /pos");
+            append_system_message("Host:    /who /close /players");
+            append_system_message("Host tp: /tp <id> | /tp <x> <y> <z>");
+            append_system_message("Host tp: /tp <id> <x> <y> <z>  (move a player)");
+            append_system_message("Host tp: /summon <id>");
+        } else {
+            append_system_message("Available: /help /clear /pos");
         }
         return true;
     }
@@ -600,6 +692,15 @@ static bool handle_chat_command(const std::string& text) {
         refresh_chat_display();
         return true;
     }
+
+    // --- Everything below this point is host-only for joiners. ---
+    if (!is_host &&
+        (cmd == "close" || cmd == "who" || cmd == "tp" ||
+         cmd == "summon" || cmd == "players")) {
+        append_system_message("/" + cmd + " is host-only (try /help)");
+        return true;
+    }
+
     if (cmd == "close") {
         if (s_chat_window) s_chat_window->setVisible(false);
         return true;

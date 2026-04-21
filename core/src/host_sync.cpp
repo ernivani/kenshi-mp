@@ -209,10 +209,40 @@ void host_sync_shutdown() {
     s_synced_npcs.clear();
 }
 
+// Walk the host's GameData map and stream every BUILDING entry to the
+// server as a catalog. The server caches this so the admin GUI can show a
+// real dropdown of "Small Shack" / "Longhouse" etc. instead of forcing
+// users to memorise stringIDs.
+static void send_building_catalog() {
+    extern void client_send_reliable(const uint8_t* data, size_t length);
+    if (!ou) return;
+    GameDataManager& gdm = ou->gamedata;
+    uint32_t count = 0;
+    typedef boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string>,
+        std::equal_to<std::string>,
+        Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy>
+    > GDMap;
+    GDMap::iterator it;
+    for (it = gdm.gamedataSID.begin(); it != gdm.gamedataSID.end(); ++it) {
+        GameData* gd = it->second;
+        if (!gd) continue;
+        if (gd->type != BUILDING) continue;
+
+        BuildingCatalogEntry e;
+        std::strncpy(e.stringID, gd->stringID.c_str(), sizeof(e.stringID) - 1);
+        std::strncpy(e.name,     gd->name.c_str(),     sizeof(e.name)     - 1);
+        std::vector<uint8_t> buf = pack(e);
+        client_send_reliable(buf.data(), buf.size());
+        ++count;
+    }
+    KMP_LOG("[KenshiMP] Sent " + itos(count) + " building catalog entries to server");
+}
+
 void host_sync_set_host(bool is_host) {
     s_is_host = is_host;
     if (is_host) {
         KMP_LOG("[KenshiMP] This client is the HOST");
+        send_building_catalog();
     }
 }
 

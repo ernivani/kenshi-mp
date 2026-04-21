@@ -40,12 +40,18 @@
 
                 <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom"/>
 
-                <Grid Grid.Row="2" RowDefinitions="Auto,*">
-                    <Button Grid.Row="0" Content="Spawn NPC" Command="{Binding SpawnNpcCommand}"
+                <Grid Grid.Row="2" RowDefinitions="Auto,Auto,*">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+                        <CheckBox Content="Enable AI" IsChecked="{Binding NpcEnableAi}"
+                                  ToolTip.Tip="Off = NPC stands still. On = faction AI wanders / reacts."/>
+                        <Button Content="Use host position" Command="{Binding UseHostPosNpcCommand}"
+                                ToolTip.Tip="Copy the host player's current coords into X/Y/Z."/>
+                    </StackPanel>
+                    <Button Grid.Row="1" Content="Spawn NPC" Command="{Binding SpawnNpcCommand}"
                             Background="#2A5FAA" Foreground="#FFFFFF"
                             HorizontalAlignment="Left" Margin="0,0,0,8"/>
 
-                    <DataGrid Grid.Row="1"
+                    <DataGrid Grid.Row="2"
                               ItemsSource="{Binding Npcs}"
                               IsReadOnly="True" GridLinesVisibility="Horizontal"
                               HeadersVisibility="Column"
@@ -80,8 +86,15 @@
 
                 <Grid Grid.Row="1" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
                       Margin="0,0,0,8">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="stringID" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
-                    <TextBox   Grid.Row="0" Grid.Column="1" Text="{Binding BldStringID, Mode=TwoWay}" Margin="0,2"/>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Type" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"
+                               ToolTip.Tip="Pick from the host's GameData catalog. The catalog is published by the host on connect. If empty, no host is connected."/>
+                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4" Margin="0,2">
+                        <ComboBox ItemsSource="{Binding BuildingCatalog}"
+                                  SelectedItem="{Binding SelectedCatalogEntry}"
+                                  HorizontalAlignment="Stretch"
+                                  MaxDropDownHeight="400"/>
+                        <TextBox Text="{Binding BldStringID, Mode=TwoWay}" Watermark="or type a stringID manually"/>
+                    </StackPanel>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="X / Y / Z" Foreground="#8A90A0" VerticalAlignment="Center" Margin="0,2,8,2"/>
                     <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="0,2">
@@ -108,12 +121,16 @@
                     </StackPanel>
                 </Grid>
 
-                <Grid Grid.Row="2" RowDefinitions="Auto,*">
-                    <Button Grid.Row="0" Content="Spawn Building" Command="{Binding SpawnBuildingCommand}"
+                <Grid Grid.Row="2" RowDefinitions="Auto,Auto,*">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+                        <Button Content="Use host position" Command="{Binding UseHostPosBuildingCommand}"
+                                ToolTip.Tip="Copy the host player's current coords into X/Y/Z."/>
+                    </StackPanel>
+                    <Button Grid.Row="1" Content="Spawn Building" Command="{Binding SpawnBuildingCommand}"
                             Background="#2A5FAA" Foreground="#FFFFFF"
                             HorizontalAlignment="Left" Margin="0,0,0,8"/>
 
-                    <DataGrid Grid.Row="1"
+                    <DataGrid Grid.Row="2"
                               ItemsSource="{Binding Buildings}"
                               IsReadOnly="True" GridLinesVisibility="Horizontal"
                               HeadersVisibility="Column"

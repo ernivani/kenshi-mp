@@ -167,6 +167,7 @@ struct RemoteNPC {
     Snapshot   prev;
     Snapshot   next;
     double     interp_t;
+    bool       ai_disabled;  // per-tick: clearAllAIGoals() to keep the NPC still
 };
 
 static std::map<uint32_t, RemoteNPC> s_remote_npcs;
@@ -406,6 +407,7 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
     std::memset(&rnpc, 0, sizeof(rnpc));
     rnpc.npc_id = pkt.npc_id;
     rnpc.npc = NULL;
+    rnpc.ai_disabled = (pkt.spawn_flags & NPC_SPAWN_FLAG_ENABLE_AI) == 0;
 
     double now = get_time_sec();
     Snapshot snap;
@@ -436,11 +438,16 @@ void npc_manager_on_remote_spawn(const NPCSpawnRemote& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
-            neutralize_remote_avatar(npc);
+            // Default: strip AI goals so the NPC just stands there. If the
+            // caller set NPC_SPAWN_FLAG_ENABLE_AI, leave the faction AI alone.
+            if ((pkt.spawn_flags & NPC_SPAWN_FLAG_ENABLE_AI) == 0) {
+                neutralize_remote_avatar(npc);
+            }
             rnpc.npc = npc;
             KMP_LOG(
                 "[KenshiMP] Spawned remote NPC " + itos(pkt.npc_id) +
-                " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race));
+                " '" + std::string(pkt.name) + "' race=" + std::string(pkt.race) +
+                ((pkt.spawn_flags & NPC_SPAWN_FLAG_ENABLE_AI) ? " ai=on" : " ai=off"));
         } else {
             KMP_LOG("[KenshiMP] WARNING: createRandomCharacter failed for NPC " + itos(pkt.npc_id));
         }
@@ -514,6 +521,25 @@ static float lerp_angle(float a, float b, float t) {
 }
 
 void npc_manager_update(float dt) {
+    // Keep AI-disabled remote NPCs inert.  Two things are needed per tick:
+    //   1. clearAllAIGoals() — faction AI repopulates the goal queue each tick.
+    //   2. setDestination(currentPos) — cancels whatever move the movement
+    //      subsystem already has queued (goals and movements are separate).
+    // Without (2) the NPC still wanders on the host even though its goal
+    // queue is empty, because the last walk command is still executing.
+    for (std::map<uint32_t, RemoteNPC>::iterator rnit = s_remote_npcs.begin();
+         rnit != s_remote_npcs.end(); ++rnit) {
+        if (!rnit->second.ai_disabled || !rnit->second.npc) continue;
+        Character* ch = rnit->second.npc;
+        ch->clearAllAIGoals();
+        CharMovement* mov = ch->getMovement();
+        if (mov) {
+            Ogre::Vector3 p = ch->getPosition();
+            mov->setDesiredSpeed(WALK);
+            mov->setDestination(p, HIGH_PRIORITY, false);
+        }
+    }
+
     // Destroy local NPCs on joiner — one per tick, closest first
     if (s_npc_wipe_active && ou) {
         s_npc_wipe_timer += dt;

@@ -314,6 +314,7 @@ KMP_API uint32_t KMP_CALL kmp_spawn_npc(const kmp_npc_spawn_request* req) {
     r.weapon = req->weapon;
     r.armour = req->armour;
     r.x = req->x; r.y = req->y; r.z = req->z; r.yaw = req->yaw;
+    r.enable_ai = req->enable_ai != 0;
     return kmp::spawn_npc(r);
 }
 
@@ -344,6 +345,19 @@ KMP_API uint32_t KMP_CALL kmp_list_spawned_npcs(kmp_npc_spawned* out, uint32_t m
         d.x = s.x; d.y = s.y; d.z = s.z; d.yaw = s.yaw;
         std::strncpy(d.name, s.name.c_str(), sizeof(d.name) - 1);
         std::strncpy(d.race, s.race.c_str(), sizeof(d.race) - 1);
+    }
+    return n;
+}
+
+KMP_API uint32_t KMP_CALL kmp_list_building_catalog(kmp_building_catalog_item* out, uint32_t max) {
+    std::vector<kmp::BuildingCatalogItem> v;
+    kmp::session_building_catalog_snapshot(v);
+    if (!out || max == 0) return (uint32_t)v.size();
+    uint32_t n = (uint32_t)v.size(); if (n > max) n = max;
+    for (uint32_t i = 0; i < n; ++i) {
+        std::memset(&out[i], 0, sizeof(out[i]));
+        std::strncpy(out[i].stringID, v[i].stringID.c_str(), sizeof(out[i].stringID) - 1);
+        std::strncpy(out[i].name,     v[i].name.c_str(),     sizeof(out[i].name)     - 1);
     }
     return n;
 }
