@@ -10,6 +10,9 @@ out/
 
 # Dependencies (cloned/extracted locally)
 deps/
+# Exception: vendored source files
+!deps/miniz/
+!deps/miniz/**
 
 # Visual Studio
 .vs/
