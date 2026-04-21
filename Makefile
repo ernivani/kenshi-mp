@@ -59,7 +59,7 @@ define BANNER
 	@echo "================================================================"
 endef
 
-.PHONY: help all core server-core server-gui build deploy publish run-server clean distclean
+.PHONY: help all core server-core server-gui build deploy publish run-server clean distclean test
 
 help:
 	@echo "KenshiMP v$(VERSION) — available targets:"
@@ -71,6 +71,7 @@ help:
 	@echo "  make deploy        Build and copy binaries into Kenshi mods folder"
 	@echo "  make publish       Produce dist/KenshiMP-v$(VERSION)-windows-x64.zip"
 	@echo "  make run-server    Launch the deployed server GUI"
+	@echo "  make test          Build and run the snapshot test suite"
 	@echo "  make clean         Remove build artifacts"
 	@echo "  make distclean     Clean + remove dist/"
 	@echo ""
@@ -137,6 +138,31 @@ deploy: build
 run-server:
 	@echo "Launching $(KENSHI_MOD_DIR)/kenshi-mp-server.exe"
 	@cd "$(KENSHI_MOD_DIR)" && ./kenshi-mp-server.exe &
+
+# ---------------------------------------------------------------------------
+# Tests — build and run the snapshot test suite (unit + integration).
+# Skips tests that don't exist yet (missing targets are tolerated).
+# ---------------------------------------------------------------------------
+SNAPSHOT_TESTS := test-snapshot-packets test-snapshot-store test-snapshot-upload \
+                  test-http-sidecar test-snapshot-e2e
+
+test: $(BUILD_SERVER)/CMakeCache.txt
+	$(call BANNER,Build snapshot test suite)
+	@for t in $(SNAPSHOT_TESTS); do \
+		if grep -q "add_executable($$t " tools/CMakeLists.txt; then \
+			"$(CMAKE)" --build "$(BUILD_SERVER)" --config Release --target $$t || exit 1; \
+		fi; \
+	done
+	$(call BANNER,Run snapshot test suite)
+	@for t in $(SNAPSHOT_TESTS); do \
+		exe="$(BUILD_SERVER)/tools/Release/$$t.exe"; \
+		if [ -x "$$exe" ]; then \
+			echo ""; echo "--- $$t ---"; \
+			"$$exe" || { echo "FAILED: $$t"; exit 1; }; \
+		fi; \
+	done
+	@echo ""
+	@echo "All snapshot tests passed."
 
 # ---------------------------------------------------------------------------
 # Publish — produce a GitHub release zip
