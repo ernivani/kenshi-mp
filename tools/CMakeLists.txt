@@ -92,3 +92,15 @@ target_include_directories(test-server-pinger PRIVATE
     ${CMAKE_SOURCE_DIR}/common/include)
 target_link_libraries(test-server-pinger PRIVATE kenshi-mp-common)
 target_compile_features(test-server-pinger PRIVATE cxx_std_17)
+
+add_executable(test-server-info-e2e test_server_info_e2e.cpp)
+target_include_directories(test-server-info-e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/common/include)
+target_link_libraries(test-server-info-e2e PRIVATE kenshi-mp-common ws2_32 winmm)
+target_compile_features(test-server-info-e2e PRIVATE cxx_std_17)
+if(ENET_DIR)
+    target_include_directories(test-server-info-e2e PRIVATE ${ENET_DIR}/include)
+    target_link_directories(test-server-info-e2e PRIVATE
+        ${ENET_DIR}/lib ${ENET_DIR}/build/Release ${ENET_DIR}/build/Debug)
+    target_link_libraries(test-server-info-e2e PRIVATE enet)
+endif()

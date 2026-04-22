@@ -151,7 +151,7 @@ SNAPSHOT_UNIT_TESTS := test-snapshot-packets test-snapshot-store \
                        test-snapshot-zip test-snapshot-uploader \
                        test-server-info-packets test-server-list \
                        test-server-pinger
-SNAPSHOT_E2E_TESTS  := test-snapshot-e2e
+SNAPSHOT_E2E_TESTS  := test-snapshot-e2e test-server-info-e2e
 
 test: $(BUILD_SERVER)/CMakeCache.txt
 	$(call BANNER,Build snapshot unit tests)
@@ -172,12 +172,17 @@ test: $(BUILD_SERVER)/CMakeCache.txt
 	@echo "All snapshot unit tests passed. (Run 'make test-e2e' for the integration test.)"
 
 test-e2e: test
-	$(call BANNER,Run e2e test against headless server)
+	$(call BANNER,Build headless server)
+	@"$(CMAKE)" --build "$(BUILD_SERVER)" --config Release --target kenshi-mp-server-headless || exit 1
+	$(call BANNER,Run e2e tests against headless server)
 	@echo "Starting headless server in background..."
 	@"$(BUILD_SERVER)/bin/Release/kenshi-mp-server-headless.exe" > /tmp/kmp-e2e-server.log 2>&1 & \
 		SPID=$$!; sleep 2; \
-		"$(BUILD_SERVER)/tools/Release/test-snapshot-e2e.exe"; \
-		EC=$$?; \
+		EC=0; \
+		for t in $(SNAPSHOT_E2E_TESTS); do \
+			echo ""; echo "--- $$t ---"; \
+			"$(BUILD_SERVER)/tools/Release/$$t.exe" || EC=$$?; \
+		done; \
 		kill $$SPID 2>/dev/null; \
 		taskkill //F //PID $$SPID 2>/dev/null || true; \
 		exit $$EC
