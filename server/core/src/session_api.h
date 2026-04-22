@@ -12,6 +12,9 @@ namespace kmp {
 class SnapshotStore;
 void         session_bind_snapshot_store(SnapshotStore* store);
 
+struct ServerConfig;
+void         session_bind_server_config(const ServerConfig* cfg);
+
 struct PlayerInfo {
     uint32_t    id;
     std::string name;

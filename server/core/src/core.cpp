@@ -111,6 +111,7 @@ static void worker_main(kmp::ServerConfig cfg) {
     // port+1 on a worker thread and serves GET /snapshot to joiners.
     g_snapshot_store = std::make_unique<kmp::SnapshotStore>();
     kmp::session_bind_snapshot_store(g_snapshot_store.get());
+    kmp::session_bind_server_config(&cfg);
 
     g_http_sidecar = std::make_unique<kmp::HttpSidecar>(*g_snapshot_store);
     uint16_t http_port = static_cast<uint16_t>(cfg.port + 1);
@@ -162,6 +163,7 @@ static void worker_main(kmp::ServerConfig cfg) {
     spdlog::info("Server stopping...");
     if (g_http_sidecar) { g_http_sidecar->stop(); g_http_sidecar.reset(); }
     kmp::session_bind_snapshot_store(nullptr);
+    kmp::session_bind_server_config(nullptr);
     g_snapshot_store.reset();
     enet_host_destroy(g_host);
     g_host = nullptr;

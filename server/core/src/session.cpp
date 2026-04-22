@@ -16,6 +16,7 @@
 
 #include "packets.h"
 #include "protocol.h"
+#include "server_config.h"
 #include "serialization.h"
 #include "posture.h"
 #include "session_api.h"
@@ -79,6 +80,14 @@ static std::set<uint32_t> s_suppress_leave;
 // session_bind_snapshot_store() from core.cpp at startup.
 static SnapshotStore*                           s_snapshot_store = nullptr;
 static std::unique_ptr<SnapshotUploadSession>   s_snapshot_session;
+
+// Live pointer to the server config — set by core.cpp at startup. Read
+// from the SERVER_INFO_REQUEST handler to fill in description + password.
+static const ServerConfig* s_server_config = nullptr;
+
+void session_bind_server_config(const ServerConfig* cfg) {
+    s_server_config = cfg;
+}
 
 static uint64_t now_wall_ms() {
     using namespace std::chrono;
@@ -466,6 +475,33 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
     if (!validate_version(header)) return;
 
     switch (header.type) {
+    case PacketType::SERVER_INFO_REQUEST: {
+        ServerInfoRequest req;
+        if (!unpack(data, length, req)) break;
+
+        ServerInfoReply reply;
+        reply.nonce             = req.nonce;
+        reply.player_count      = static_cast<uint16_t>(s_sessions.size());
+        reply.max_players       = s_server_config
+            ? static_cast<uint16_t>(s_server_config->max_players)
+            : 16;
+        reply.protocol_version  = PROTOCOL_VERSION;
+        reply.password_required = (s_server_config && !s_server_config->password.empty())
+            ? 1 : 0;
+        if (s_server_config) {
+            std::strncpy(reply.description,
+                         s_server_config->description.c_str(),
+                         sizeof(reply.description) - 1);
+            reply.description[sizeof(reply.description) - 1] = '\0';
+        }
+
+        auto buf = pack(reply);
+        relay_send_to(peer, buf.data(), buf.size(), true);
+        spdlog::debug("SERVER_INFO sent: players={} protocol={}",
+                      reply.player_count,
+                      static_cast<int>(reply.protocol_version));
+        break;
+    }
     case PacketType::CONNECT_REQUEST:
         handle_connect_request(peer, data, length);
         break;
