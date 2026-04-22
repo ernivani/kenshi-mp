@@ -5,6 +5,7 @@
 #include <shlobj.h>
 
 #include <kenshi/SaveFileSystem.h>
+#include <kenshi/SaveManager.h>
 
 #include "kmp_log.h"
 
@@ -35,23 +36,34 @@ static std::string documents_path() {
 } // namespace
 
 bool save_trigger_start(const std::string& slot_name) {
-    SaveFileSystem* sfs = SaveFileSystem::getSingleton();
-    if (!sfs) {
-        KMP_LOG("[KenshiMP] save_trigger: SaveFileSystem singleton is null");
+    // Use the high-level SaveManager::save() entry point — same one the
+    // in-game Save menu calls. It populates save.xml, quick.save, itemKey,
+    // characterKey, etc. and queues the actual file write on Kenshi's save
+    // worker thread. Polling SaveFileSystem::busy() tells us when it's done.
+    //
+    // NB: we used to call SaveFileSystem::saveGame(path) directly, but that's
+    // the low-level file-mover — it skips all the preparation SaveManager
+    // does, resulting in partial saves and a "Could not find the save folder"
+    // dialog from Kenshi.
+    SaveManager* sm = SaveManager::getSingleton();
+    if (!sm) {
+        KMP_LOG("[KenshiMP] save_trigger: SaveManager singleton is null");
         return false;
     }
-    std::string path = save_trigger_resolve_slot_path(slot_name);
-    if (path.empty()) {
-        KMP_LOG("[KenshiMP] save_trigger: could not resolve Documents path");
-        return false;
-    }
-    bool ok = sfs->saveGame(path);
-    KMP_LOG(std::string("[KenshiMP] save_trigger: saveGame('") + path
-            + "') returned " + (ok ? "true" : "false"));
-    return ok;
+    sm->save(slot_name, /*autosave=*/true);
+    KMP_LOG(std::string("[KenshiMP] save_trigger: SaveManager::save('")
+            + slot_name + "') queued");
+    return true;
 }
 
 bool save_trigger_is_busy() {
+    // SaveManager::save() only *queues*: the actual write happens on the
+    // next tick when Kenshi's main loop calls SaveManager::execute(), which
+    // dispatches to SaveFileSystem on the worker thread. To avoid
+    // transitioning to ZIP before the save has even started, report busy if
+    // EITHER the SaveManager has a pending signal OR the worker is writing.
+    SaveManager* sm = SaveManager::getSingleton();
+    if (sm && sm->signal != 0) return true;
     SaveFileSystem* sfs = SaveFileSystem::getSingleton();
     if (!sfs) return false;
     return sfs->busy();
