@@ -73,3 +73,7 @@ if(ENET_DIR)
 endif()
 
 target_link_libraries(test-client PRIVATE ws2_32 winmm)
+
+add_executable(test-server-info-packets test_server_info_packets.cpp)
+target_link_libraries(test-server-info-packets PRIVATE kenshi-mp-common)
+target_compile_features(test-server-info-packets PRIVATE cxx_std_17)

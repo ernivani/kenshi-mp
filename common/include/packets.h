@@ -47,6 +47,11 @@ namespace PacketType {
     static const uint8_t SNAPSHOT_UPLOAD_CHUNK = 0xA1;
     static const uint8_t SNAPSHOT_UPLOAD_END   = 0xA2;
     static const uint8_t SNAPSHOT_UPLOAD_ACK   = 0xA3;
+    // Server browser: unauth ping. Client sends REQUEST to a server it's
+    // never connected to; server responds with REPLY before CONNECT_REQUEST
+    // gate. See docs/superpowers/specs/2026-04-22-server-browser-ui-design.md
+    static const uint8_t SERVER_INFO_REQUEST = 0xB0;
+    static const uint8_t SERVER_INFO_REPLY   = 0xB1;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +411,34 @@ struct SnapshotUploadAck {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::SNAPSHOT_UPLOAD_ACK;
+    }
+};
+
+struct ServerInfoRequest {
+    PacketHeader header;
+    uint32_t     nonce;
+
+    ServerInfoRequest() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SERVER_INFO_REQUEST;
+    }
+};
+
+struct ServerInfoReply {
+    PacketHeader header;
+    uint32_t     nonce;
+    uint16_t     player_count;
+    uint16_t     max_players;
+    uint8_t      protocol_version;
+    uint8_t      password_required;  // 0 or 1
+    uint8_t      _pad[2];
+    char         description[128];   // null-terminated, UTF-8
+
+    ServerInfoReply() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::SERVER_INFO_REPLY;
     }
 };
 
