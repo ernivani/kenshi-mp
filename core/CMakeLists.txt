@@ -26,6 +26,7 @@ add_library(KenshiMP SHARED
     src/server_pinger.cpp
     src/server_browser.cpp
     src/joiner_runtime.cpp
+    src/joiner_runtime_glue.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
