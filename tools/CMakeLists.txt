@@ -77,3 +77,10 @@ target_link_libraries(test-client PRIVATE ws2_32 winmm)
 add_executable(test-server-info-packets test_server_info_packets.cpp)
 target_link_libraries(test-server-info-packets PRIVATE kenshi-mp-common)
 target_compile_features(test-server-info-packets PRIVATE cxx_std_17)
+
+add_executable(test-server-list test_server_list.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/server_list.cpp)
+target_include_directories(test-server-list PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(test-server-list PRIVATE kenshi-mp-common)
+target_compile_features(test-server-list PRIVATE cxx_std_17)

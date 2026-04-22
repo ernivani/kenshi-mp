@@ -19,6 +19,7 @@ add_library(KenshiMP SHARED
     src/snapshot_zip.cpp
     src/snapshot_uploader.cpp
     src/snapshot_uploader_glue.cpp
+    src/server_list.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
