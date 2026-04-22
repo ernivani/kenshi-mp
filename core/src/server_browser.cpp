@@ -80,6 +80,72 @@ static void apply_ping_to_row(const std::string& id);
 static void on_add_ok(MyGUI::Widget*);
 static void on_add_cancel(MyGUI::Widget*);
 
+// Hide the caption bar + close button + minimise/maximise on a MyGUI
+// Window. Kenshi_WindowCX ships with these as child widgets named
+// "Caption", "Button_Close", etc. For our modals we want a frameless
+// panel look — no drag bar, no X. Any child we don't find is silently
+// skipped.
+static void hide_window_chrome(MyGUI::Widget* w) {
+    if (!w) return;
+    const char* names[] = {
+        "Caption", "Button_Close", "Button_Minimize", "Button_Maximize",
+        "Close", "Minimize", "Maximize",
+        NULL
+    };
+    for (const char** n = names; *n; ++n) {
+        MyGUI::Widget* child = w->findWidget(*n);
+        if (child) child->setVisible(false);
+    }
+}
+
+// Try creating a Window with a skin that has no caption bar / close
+// button. Kenshi's Options window uses a "chromeless" variant — we
+// probe common names and fall back to Kenshi_WindowCX + hide_window_
+// chrome if nothing else works.
+static MyGUI::Window* create_chromeless_window(
+        MyGUI::Widget* parent_or_gui_root_signal,  // NULL → use Gui root
+        const MyGUI::IntCoord& coord,
+        MyGUI::Align align,
+        const char* layer,   // used only if parent is NULL
+        const char* name) {
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+    if (!gui) return NULL;
+
+    const char* skins[] = {
+        "Kenshi_Window",
+        "Kenshi_WindowC",
+        "Kenshi_WindowCSX",
+        "Kenshi_WindowCX",
+        NULL
+    };
+    MyGUI::Window* w = NULL;
+    const char* chosen = NULL;
+    for (const char** s = skins; *s && !w; ++s) {
+        try {
+            if (parent_or_gui_root_signal) {
+                w = parent_or_gui_root_signal->createWidget<MyGUI::Window>(
+                    *s, coord, align, name);
+            } else {
+                w = gui->createWidget<MyGUI::Window>(
+                    *s, coord, align, layer, name);
+            }
+            chosen = *s;
+        } catch (const MyGUI::Exception&) {
+            w = NULL;
+        }
+    }
+    if (w) {
+        char dbg[128];
+        _snprintf(dbg, sizeof(dbg),
+            "[KenshiMP] browser: window '%s' using skin '%s'",
+            name, chosen ? chosen : "(null)");
+        KMP_LOG(dbg);
+        w->setMovable(false);
+        hide_window_chrome(w);  // no-op if skin has no chrome children
+    }
+    return w;
+}
+
 static void on_window_button(MyGUI::Window*, const std::string& name) {
     if (name == "close") server_browser_close();
 }
@@ -216,12 +282,11 @@ static void show_connecting_modal(const ServerEntry& e) {
     if (!gui) return;
 
     if (!s_connecting_window) {
-        s_connecting_window = gui->createWidget<MyGUI::Window>(
-            "Kenshi_WindowCX",
-            MyGUI::IntCoord(312, 280, 400, 200),
+        s_connecting_window = create_chromeless_window(
+            NULL, MyGUI::IntCoord(312, 280, 400, 200),
             MyGUI::Align::Default, "Overlapped", "KMP_ConnectingWindow");
+        if (!s_connecting_window) return;
         s_connecting_window->setCaption("");
-        s_connecting_window->setMovable(false);
         s_connecting_label = s_connecting_window->createWidget<MyGUI::TextBox>(
             "Kenshi_TextBoxEmptySkin",
             MyGUI::IntCoord(16, 30, 368, 90), MyGUI::Align::Default);
@@ -338,13 +403,9 @@ static void create_main_window() {
     // TitleScreen's main widget (and all its children) in open() before
     // showing the browser, so nothing from TitleScreen bleeds through.
     MyGUI::IntCoord full(0, 0, 1024, 768);
-    s_window = gui->createWidget<MyGUI::Window>(
-        "Kenshi_WindowCX", full, MyGUI::Align::Stretch,
-        "Overlapped", "KMP_BrowserWindow");
-    KMP_LOG("[KenshiMP] browser: full-screen window on Gui root (Overlapped)");
+    s_window = create_chromeless_window(
+        NULL, full, MyGUI::Align::Stretch, "Overlapped", "KMP_BrowserWindow");
     if (!s_window) return;
-    // Lock in place — this is a full-screen modal, not a floating dialog.
-    s_window->setMovable(false);
     s_window->setCaption("Multiplayer Servers");
     s_window->setVisible(false);
     s_window->eventWindowButtonPressed += MyGUI::newDelegate(on_window_button);
@@ -428,10 +489,10 @@ static void create_add_window() {
     if (s_add_window) return;
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (!gui) return;
-    s_add_window = gui->createWidget<MyGUI::Window>(
-        "Kenshi_WindowCX",
-        MyGUI::IntCoord(150, 150, 320, 260),
+    s_add_window = create_chromeless_window(
+        NULL, MyGUI::IntCoord(150, 150, 320, 260),
         MyGUI::Align::Default, "Overlapped", "KMP_BrowserAddWindow");
+    if (!s_add_window) return;
     s_add_window->setCaption("Add Server");
     s_add_window->setVisible(false);
     s_add_window->eventWindowButtonPressed += MyGUI::newDelegate(on_add_window_button);
