@@ -35,6 +35,14 @@ static std::string documents_path() {
 
 } // namespace
 
+// Tick count when the last save_trigger_start() was called. Used by
+// save_trigger_is_busy() to treat the first ~few seconds as "still busy"
+// even if SaveFileSystem::busy() hasn't flipped true yet — Kenshi's
+// SaveManager::save() just queues a signal; the actual worker write
+// doesn't begin until SaveManager::execute() runs on the next tick, so
+// there's a gap where busy() is transiently false.
+static ULONGLONG s_save_started_ms = 0;
+
 bool save_trigger_start(const std::string& slot_name) {
     // Use the high-level SaveManager::save() entry point — same one the
     // in-game Save menu calls. It populates save.xml, quick.save, itemKey,
@@ -50,26 +58,69 @@ bool save_trigger_start(const std::string& slot_name) {
         KMP_LOG("[KenshiMP] save_trigger: SaveManager singleton is null");
         return false;
     }
-    sm->save(slot_name, /*autosave=*/true);
-    KMP_LOG(std::string("[KenshiMP] save_trigger: SaveManager::save('")
-            + slot_name + "') queued");
+
+    // Tried sm->save(slot, autosave=true) — it just sets a signal and
+    // relies on SaveManager::execute() running later on the game thread.
+    // In practice execute() never dispatches our signal (probably because
+    // the menu context or some precondition isn't met), so the save never
+    // actually happens. Go straight to saveGame(location, name) — the
+    // synchronous internal call that the signal path dispatches to anyway.
+    const std::string& loc = sm->userSavePath.empty() ? sm->localSavePath
+                                                      : sm->userSavePath;
+    int rc = sm->saveGame(loc, slot_name);
+    s_save_started_ms = GetTickCount64();
+    KMP_LOG(std::string("[KenshiMP] save_trigger: SaveManager::saveGame(loc='")
+            + loc + "', name='" + slot_name + "') returned "
+            + std::to_string(static_cast<long long>(rc)));
     return true;
 }
 
 bool save_trigger_is_busy() {
     // SaveManager::save() only *queues*: the actual write happens on the
     // next tick when Kenshi's main loop calls SaveManager::execute(), which
-    // dispatches to SaveFileSystem on the worker thread. To avoid
-    // transitioning to ZIP before the save has even started, report busy if
-    // EITHER the SaveManager has a pending signal OR the worker is writing.
-    SaveManager* sm = SaveManager::getSingleton();
-    if (sm && sm->signal != 0) return true;
+    // dispatches to SaveFileSystem on the worker thread.
+    //
+    // Two races to guard against:
+    //   1. Query before execute() dispatches → busy()=false but save hasn't
+    //      started yet. We'd transition to ZIP with stale files on disk.
+    //   2. Query during the worker write → busy()=true. This is the normal
+    //      case and we stay in WAIT_SAVE.
+    //
+    // Solution: report busy for at least kGraceMs after start() regardless
+    // of what busy() says, then rely on busy() alone once grace elapses.
+    // Empirically Kenshi's save takes 0.5-3s on a mid-game save, so 4s is
+    // safe without noticeably delaying the happy path.
+    const ULONGLONG kGraceMs = 4000;
+    ULONGLONG now_ms = GetTickCount64();
+    bool in_grace = (s_save_started_ms > 0) &&
+                    (now_ms - s_save_started_ms < kGraceMs);
+
     SaveFileSystem* sfs = SaveFileSystem::getSingleton();
-    if (!sfs) return false;
-    return sfs->busy();
+    bool worker_busy = sfs ? sfs->busy() : false;
+
+    return in_grace || worker_busy;
 }
 
 std::string save_trigger_resolve_slot_path(const std::string& slot_name) {
+    // Ask SaveManager where it actually writes saves. Kenshi's save root
+    // is NOT always <Documents>\My Games\Kenshi\save — the GOG build and
+    // some configurations use <AppData>\Local\kenshi\save instead. The
+    // SaveManager knows the real path via its userSavePath / localSavePath
+    // members, populated at init by Kenshi.
+    SaveManager* sm = SaveManager::getSingleton();
+    if (sm) {
+        const std::string& root = sm->userSavePath.empty() ? sm->localSavePath
+                                                           : sm->userSavePath;
+        if (!root.empty()) {
+            // userSavePath usually has a trailing separator; tolerate both.
+            std::string base = root;
+            if (!base.empty() && base.back() != '\\' && base.back() != '/') {
+                base += '\\';
+            }
+            return base + slot_name;
+        }
+    }
+    // Fallback: <Documents>\My Games\Kenshi\save\<slot> (Steam default).
     std::string docs = documents_path();
     if (docs.empty()) return std::string();
     return docs + "\\My Games\\Kenshi\\save\\" + slot_name;
