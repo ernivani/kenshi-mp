@@ -21,6 +21,7 @@ add_library(KenshiMP SHARED
     src/snapshot_uploader_glue.cpp
     src/server_list.cpp
     src/server_pinger.cpp
+    src/server_browser.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
