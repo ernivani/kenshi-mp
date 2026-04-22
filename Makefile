@@ -148,7 +148,7 @@ run-server:
 # ---------------------------------------------------------------------------
 SNAPSHOT_UNIT_TESTS := test-snapshot-packets test-snapshot-store \
                        test-snapshot-upload test-http-sidecar \
-                       test-snapshot-zip
+                       test-snapshot-zip test-snapshot-uploader
 SNAPSHOT_E2E_TESTS  := test-snapshot-e2e
 
 test: $(BUILD_SERVER)/CMakeCache.txt

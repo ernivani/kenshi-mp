@@ -32,6 +32,14 @@ target_include_directories(test-snapshot-zip PRIVATE
 target_link_libraries(test-snapshot-zip PRIVATE kenshi-mp-common)
 target_compile_features(test-snapshot-zip PRIVATE cxx_std_17)
 
+add_executable(test-snapshot-uploader test_snapshot_uploader.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_uploader.cpp)
+target_include_directories(test-snapshot-uploader PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/deps/picosha2)
+target_link_libraries(test-snapshot-uploader PRIVATE kenshi-mp-common)
+target_compile_features(test-snapshot-uploader PRIVATE cxx_std_17)
+
 add_executable(test-http-sidecar test_http_sidecar.cpp
     ${CMAKE_SOURCE_DIR}/server/core/src/snapshot.cpp
     ${CMAKE_SOURCE_DIR}/server/core/src/http_sidecar.cpp)

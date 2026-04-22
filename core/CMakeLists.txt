@@ -17,13 +17,16 @@ add_library(KenshiMP SHARED
     src/client_identity.cpp
     src/save_trigger.cpp
     src/snapshot_zip.cpp
+    src/snapshot_uploader.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
 # miniz — force C language so MSVC generator emits ClCompile, not None
 set_source_files_properties(${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
     PROPERTIES LANGUAGE C)
-target_include_directories(KenshiMP PRIVATE ${CMAKE_SOURCE_DIR}/deps/miniz)
+target_include_directories(KenshiMP PRIVATE
+    ${CMAKE_SOURCE_DIR}/deps/miniz
+    ${CMAKE_SOURCE_DIR}/deps/picosha2)
 
 # KenshiLib PerfTimer.h uses wide-string CreateMutex
 target_compile_definitions(KenshiMP PRIVATE UNICODE _UNICODE)
