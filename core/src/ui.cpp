@@ -53,6 +53,8 @@ extern void player_sync_set_requested_host(bool val);
 extern bool host_sync_is_host();
 extern void snapshot_uploader_glue_start(const std::string& slot);
 extern std::string snapshot_uploader_glue_progress_text();
+extern int snapshot_uploader_glue_state_int();
+extern std::string snapshot_uploader_glue_last_error();
 extern Character* game_get_player_character();
 extern Character* npc_manager_get_player_avatar(uint32_t player_id);
 extern void       npc_manager_list_remote_players(std::vector<uint32_t>& out);
@@ -851,6 +853,47 @@ static void refresh_chat_display() {
     s_chat_display->setTextCursor(text.size());
     size_t vrange = s_chat_display->getVScrollRange();
     if (vrange > 0) s_chat_display->setVScrollPosition(vrange - 1);
+}
+
+// Track last-seen upload state so we can emit a chat-log line when it flips.
+// Values match SnapshotUploader::State enum order: 0=IDLE 1=WAIT_SAVE
+// 2=ZIP_RUNNING 3=SEND_CHUNKS 4=AWAIT_ACK 5=FAILED. -1 means uninit.
+static int s_last_upload_state = -1;
+
+// Called every frame from player_sync_tick so chat-log transitions fire
+// as the uploader advances between states.
+void ui_tick();
+
+static void poll_upload_state_changes() {
+    int st = snapshot_uploader_glue_state_int();
+    if (st == s_last_upload_state || st < 0) return;
+    int prev = s_last_upload_state;
+    s_last_upload_state = st;
+    switch (st) {
+        case 0:  // IDLE
+            // From AWAIT_ACK means success. From -1 or initial state means no-op.
+            if (prev == 4) append_system_message("World ready \xE2\x80\x94 joiners can connect");
+            break;
+        case 1:  // WAIT_SAVE
+            append_system_message("Preparing world snapshot...");
+            break;
+        case 2:  // ZIP_RUNNING
+            append_system_message("Packaging world...");
+            break;
+        case 3:  // SEND_CHUNKS
+            append_system_message("Uploading world to server...");
+            break;
+        case 5:  // FAILED
+            append_system_message(std::string("Upload failed: ") +
+                                  snapshot_uploader_glue_last_error());
+            break;
+        default: break;
+    }
+}
+
+void ui_tick() {
+    poll_upload_state_changes();
+    update_status_text();
 }
 
 static void update_status_text() {
