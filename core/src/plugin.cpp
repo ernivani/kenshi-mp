@@ -28,6 +28,7 @@ namespace kmp {
     void snapshot_uploader_glue_shutdown();
     void server_browser_init();
     void server_browser_shutdown();
+    void server_browser_tick(float dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -52,8 +53,15 @@ static void hooked_title_update(void* self) {
         s_title_ui_inited = true;
         KMP_LOG("[KenshiMP] Title screen detected; initialising menu UI...");
         kmp::ui_init();
+        kmp::server_browser_init();
     }
     kmp::ui_update_main_menu_button();
+    // Tick the server browser too — its ping state machine needs frame
+    // updates to drive ENet handshake + timeouts. player_sync_tick (the
+    // in-game tick) doesn't fire on the title screen where the browser
+    // lives, so we tick here. dt is approximate (title-screen hook doesn't
+    // pass real dt); 1/60s is fine for network-grade timing.
+    kmp::server_browser_tick(0.016f);
 }
 
 static void hooked_main_loop(GameWorld* world, float time) {

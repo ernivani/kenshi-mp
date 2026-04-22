@@ -6,8 +6,16 @@
 
 #include <MyGUI.h>
 #include <OgreLogManager.h>
+#include <kenshi/gui/GUIWindow.h>
 
 #include <enet/enet.h>
+
+// Forward-decl TitleScreen (see ui.cpp for the reason — TitleScreen.h
+// redefines GUIWindow inline and collides with GUIWindow.h).
+class TitleScreen : public GUIWindow {
+public:
+    static TitleScreen* getSingleton();
+};
 
 #include <cstdio>
 #include <cstring>
@@ -33,14 +41,16 @@ struct RowWidgets {
 };
 
 static bool                          s_open = false;
+static MyGUI::Widget*                s_backdrop = NULL;
 static MyGUI::Window*                s_window = NULL;
 static MyGUI::Button*                s_btn_refresh = NULL;
+static MyGUI::Button*                s_btn_back    = NULL;
 static MyGUI::Button*                s_btn_direct  = NULL;
 static MyGUI::Button*                s_btn_add     = NULL;
 static MyGUI::Button*                s_btn_edit    = NULL;
 static MyGUI::Button*                s_btn_remove  = NULL;
 static MyGUI::Button*                s_btn_join    = NULL;
-static MyGUI::ScrollView*            s_list_scroll = NULL;
+static MyGUI::Widget*                s_list_scroll = NULL;  // container for rows (top-anchored)
 static std::vector<ServerEntry>      s_entries;
 static std::map<std::string, RowWidgets> s_rows;
 static std::string                   s_selected_id;
@@ -54,13 +64,13 @@ static std::map<std::string, ENetPeer*> s_id_to_peer;
 // Add/Edit dialog
 static MyGUI::Window*   s_add_window = NULL;
 static MyGUI::EditBox*  s_add_name   = NULL;
-static MyGUI::EditBox*  s_add_addr   = NULL;
-static MyGUI::EditBox*  s_add_port   = NULL;
+static MyGUI::EditBox*  s_add_addr   = NULL;  // "host" or "host:port"
 static MyGUI::EditBox*  s_add_pw     = NULL;
 static MyGUI::TextBox*  s_add_err    = NULL;
 static MyGUI::Button*   s_add_ok     = NULL;
 static MyGUI::Button*   s_add_cancel = NULL;
-static bool             s_add_is_edit = false;
+static bool             s_add_is_edit   = false;  // editing existing entry
+static bool             s_add_is_direct = false;  // direct connect (no save)
 
 static void rebuild_rows();
 static void update_button_states();
@@ -79,11 +89,36 @@ static void on_add_window_button(MyGUI::Window*, const std::string& name) {
 }
 
 static void on_refresh(MyGUI::Widget*) { start_all_pings(); }
+static void on_back(MyGUI::Widget*)    { server_browser_close(); }
+
+static void on_join(MyGUI::Widget*);  // forward-decl
+
+// Manual double-click detection: MyGUI's eventMouseButtonDoubleClick
+// doesn't fire on Button widgets with the Kenshi skin. Track the last
+// clicked row-id + click time and call it a double when two hits on the
+// same id land within 400 ms.
+static std::string s_last_click_id;
+static ULONGLONG   s_last_click_ms = 0;
+static const ULONGLONG kDoubleClickMs = 400;
 
 static void on_row_click(MyGUI::Widget* sender) {
     std::string id = sender->getUserString("kmp_row_id");
     if (id.empty()) return;
+
+    ULONGLONG now_ms = GetTickCount64();
+    bool is_double = (!s_last_click_id.empty()) && (s_last_click_id == id) &&
+                     (now_ms - s_last_click_ms < kDoubleClickMs);
+
     s_selected_id = id;
+    s_last_click_id = id;
+    s_last_click_ms = now_ms;
+
+    if (is_double) {
+        if (s_pinger && s_pinger->status(id) == ServerPinger::Status::Success) {
+            on_join(NULL);
+            return;
+        }
+    }
     rebuild_rows();
     update_button_states();
 }
@@ -91,9 +126,9 @@ static void on_row_click(MyGUI::Widget* sender) {
 static void on_add(MyGUI::Widget*) {
     if (!s_add_window) return;
     s_add_is_edit = false;
+    s_add_is_direct = false;
     s_add_name->setCaption("");
     s_add_addr->setCaption("");
-    s_add_port->setCaption("7777");
     s_add_pw->setCaption("");
     s_add_err->setCaption("");
     s_add_window->setCaption("Add Server");
@@ -107,11 +142,18 @@ static void on_edit(MyGUI::Widget*) {
         const ServerEntry& e = s_entries[i];
         if (e.id != s_selected_id) continue;
         s_add_is_edit = true;
+        s_add_is_direct = false;
         s_add_name->setCaption(e.name);
-        s_add_addr->setCaption(e.address);
-        char pbuf[16];
-        _snprintf(pbuf, sizeof(pbuf), "%u", static_cast<unsigned>(e.port));
-        s_add_port->setCaption(pbuf);
+        // Combine host:port into the single address field (skip ":port"
+        // if it's the default 7777 — cleaner UX à la Minecraft).
+        char abuf[256];
+        if (e.port == 7777) {
+            _snprintf(abuf, sizeof(abuf), "%s", e.address.c_str());
+        } else {
+            _snprintf(abuf, sizeof(abuf), "%s:%u",
+                e.address.c_str(), static_cast<unsigned>(e.port));
+        }
+        s_add_addr->setCaption(abuf);
         s_add_pw->setCaption(e.password);
         s_add_err->setCaption("");
         s_add_window->setCaption("Edit Server");
@@ -137,8 +179,110 @@ static void on_remove(MyGUI::Widget*) {
 }
 
 static void on_direct(MyGUI::Widget*) {
-    // MVP: same as Add. User deletes after if they don't want persisted.
-    on_add(NULL);
+    if (!s_add_window) return;
+    s_add_is_edit = false;
+    s_add_is_direct = true;
+    s_add_name->setCaption("");
+    s_add_addr->setCaption("");
+    s_add_pw->setCaption("");
+    s_add_err->setCaption("");
+    s_add_window->setCaption("Direct Connect");
+    s_add_window->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(s_add_window);
+}
+
+// Connecting placeholder modal. Real download+load wiring is Plan A.4.
+static MyGUI::Window*  s_connecting_window = NULL;
+static MyGUI::TextBox* s_connecting_label  = NULL;
+static MyGUI::Button*  s_connecting_cancel = NULL;
+static bool            s_connecting_visible = false;
+static ULONGLONG       s_connecting_since_ms = 0;
+static std::string     s_connecting_server_line;
+
+static void on_connecting_cancel(MyGUI::Widget*);
+
+static void update_connecting_caption() {
+    if (!s_connecting_visible || !s_connecting_label) return;
+    ULONGLONG elapsed = GetTickCount64() - s_connecting_since_ms;
+    int dots = (int)((elapsed / 500) % 3) + 1;  // 1, 2, 3, 1, 2, 3, ...
+    const char* dot_str = (dots == 1) ? "." : (dots == 2) ? ".." : "...";
+    std::string caption = "Connecting" + std::string(dot_str) +
+                          "\n\n" + s_connecting_server_line;
+    s_connecting_label->setCaption(caption);
+}
+
+static void show_connecting_modal(const ServerEntry& e) {
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+    if (!gui) return;
+
+    if (!s_connecting_window) {
+        s_connecting_window = gui->createWidget<MyGUI::Window>(
+            "Kenshi_WindowCX",
+            MyGUI::IntCoord(312, 280, 400, 200),
+            MyGUI::Align::Default, "Overlapped", "KMP_ConnectingWindow");
+        s_connecting_window->setCaption("");
+        s_connecting_window->setMovable(false);
+        s_connecting_label = s_connecting_window->createWidget<MyGUI::TextBox>(
+            "Kenshi_TextBoxEmptySkin",
+            MyGUI::IntCoord(16, 30, 368, 90), MyGUI::Align::Default);
+        s_connecting_label->setFontName("Kenshi_StandardFont_Medium");
+        s_connecting_label->setTextColour(MyGUI::Colour(0.92f, 0.88f, 0.82f));
+        s_connecting_label->setTextAlign(MyGUI::Align::Center);
+
+        s_connecting_cancel = s_connecting_window->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(150, 130, 100, 32), MyGUI::Align::Default);
+        s_connecting_cancel->setCaption("Cancel");
+        s_connecting_cancel->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_connecting_cancel->setTextAlign(MyGUI::Align::Center);
+        s_connecting_cancel->eventMouseButtonClick +=
+            MyGUI::newDelegate(on_connecting_cancel);
+    }
+
+    char srv[192];
+    _snprintf(srv, sizeof(srv), "%s\n%s:%u",
+        e.name.c_str(), e.address.c_str(), static_cast<unsigned>(e.port));
+    s_connecting_server_line = srv;
+    s_connecting_since_ms = GetTickCount64();
+    s_connecting_visible = true;
+    update_connecting_caption();
+    s_connecting_window->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(s_connecting_window);
+
+    // Disable everything on the main browser so only the Cancel button
+    // responds while "connecting". Re-enabled when modal is dismissed.
+    if (s_btn_refresh) s_btn_refresh->setEnabled(false);
+    if (s_btn_back)    s_btn_back->setEnabled(false);
+    if (s_btn_direct)  s_btn_direct->setEnabled(false);
+    if (s_btn_add)     s_btn_add->setEnabled(false);
+    if (s_btn_edit)    s_btn_edit->setEnabled(false);
+    if (s_btn_remove)  s_btn_remove->setEnabled(false);
+    if (s_btn_join)    s_btn_join->setEnabled(false);
+    for (std::map<std::string, RowWidgets>::iterator it = s_rows.begin();
+         it != s_rows.end(); ++it) {
+        if (it->second.root) it->second.root->setEnabled(false);
+    }
+}
+
+static void hide_connecting_modal() {
+    if (s_connecting_window) s_connecting_window->setVisible(false);
+    s_connecting_visible = false;
+
+    // Restore main browser controls.
+    if (s_btn_refresh) s_btn_refresh->setEnabled(true);
+    if (s_btn_back)    s_btn_back->setEnabled(true);
+    if (s_btn_direct)  s_btn_direct->setEnabled(true);
+    if (s_btn_add)     s_btn_add->setEnabled(true);
+    for (std::map<std::string, RowWidgets>::iterator it = s_rows.begin();
+         it != s_rows.end(); ++it) {
+        if (it->second.root) it->second.root->setEnabled(true);
+    }
+    update_button_states();  // Edit/Remove/Join based on selection again
+}
+
+static void on_connecting_cancel(MyGUI::Widget*) {
+    KMP_LOG("[KenshiMP] Join cancelled by user");
+    hide_connecting_modal();
 }
 
 static void on_join(MyGUI::Widget*) {
@@ -150,23 +294,57 @@ static void on_join(MyGUI::Widget*) {
             "[KenshiMP] Join clicked: '%s' @ %s:%u",
             e.name.c_str(), e.address.c_str(), static_cast<unsigned>(e.port));
         KMP_LOG(logbuf);
+        show_connecting_modal(e);
         break;
     }
-    server_browser_close();
+    // Don't close the browser; show the connecting modal on top instead.
 }
+
+// Get TitleScreen's main widget via BaseLayout::mMainWidget at offset 0x38.
+static MyGUI::Widget* title_screen_root() {
+    TitleScreen* ts = TitleScreen::getSingleton();
+    if (!ts) return NULL;
+    return *reinterpret_cast<MyGUI::Widget**>(
+        reinterpret_cast<uint8_t*>(ts) + 0x38);
+}
+
+// Per-child visibility snapshot for the TitleScreen's menu children while
+// the browser is open. We hide each child explicitly (setVisible on the
+// parent doesn't cascade cleanly for all of Kenshi's menu widgets) and
+// restore them on close.
+struct TSChildSnap { MyGUI::Widget* w; bool was_visible; };
+static std::vector<TSChildSnap> s_ts_hidden_children;
 
 static void create_main_window() {
     if (s_window) return;
     MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
     if (!gui) return;
 
+    // Attach to the Gui root on the top-most MyGUI layer ("Pointer"), NOT
+    // as child of TitleScreen. Using the Pointer layer puts us above
+    // everything Kenshi renders, including the title-screen menu widgets
+    // whose text captions render in a later pass. Falls back to
+    // "Overlapped" if "Pointer" isn't registered.
+    s_backdrop = NULL;
+
+    // Attach as child of TitleScreen's main widget — this is the only
+    // path that actually renders above Kenshi's title-screen background.
+    // Gui-root on "Overlapped" is positioned BEHIND TitleScreen visually,
+    // so even though the widget is correctly sized+visible, it's not seen.
+    // If TitleScreen isn't available (e.g. opened mid-game later),
+    // fall back to Gui root "Overlapped" which is normal for in-game
+    // dialogs.
+    // Full-screen window on Gui root, Overlapped layer. We hide
+    // TitleScreen's main widget (and all its children) in open() before
+    // showing the browser, so nothing from TitleScreen bleeds through.
+    MyGUI::IntCoord full(0, 0, 1024, 768);
     s_window = gui->createWidget<MyGUI::Window>(
-        "Kenshi_WindowCX",
-        MyGUI::IntCoord(100, 100, 600, 460),
-        MyGUI::Align::Default,
-        "Overlapped",
-        "KMP_BrowserWindow"
-    );
+        "Kenshi_WindowCX", full, MyGUI::Align::Stretch,
+        "Overlapped", "KMP_BrowserWindow");
+    KMP_LOG("[KenshiMP] browser: full-screen window on Gui root (Overlapped)");
+    if (!s_window) return;
+    // Lock in place — this is a full-screen modal, not a floating dialog.
+    s_window->setMovable(false);
     s_window->setCaption("Multiplayer Servers");
     s_window->setVisible(false);
     s_window->eventWindowButtonPressed += MyGUI::newDelegate(on_window_button);
@@ -177,43 +355,72 @@ static void create_main_window() {
         MyGUI::IntCoord(pad, pad, 90, 28),
         MyGUI::Align::Left | MyGUI::Align::Top);
     s_btn_refresh->setCaption("Refresh");
+    s_btn_refresh->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_refresh->setTextAlign(MyGUI::Align::Center);
     s_btn_refresh->eventMouseButtonClick += MyGUI::newDelegate(on_refresh);
 
+    // Back button next to Refresh — closes the browser and returns to
+    // the title screen.
+    s_btn_back = s_window->createWidget<MyGUI::Button>(
+        "Kenshi_Button1Skin",
+        MyGUI::IntCoord(pad + 96, pad, 90, 28),
+        MyGUI::Align::Left | MyGUI::Align::Top);
+    s_btn_back->setCaption("Back");
+    s_btn_back->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_back->setTextAlign(MyGUI::Align::Center);
+    s_btn_back->eventMouseButtonClick += MyGUI::newDelegate(on_back);
+
     MyGUI::IntSize client = s_window->getClientCoord().size();
-    s_list_scroll = s_window->createWidget<MyGUI::ScrollView>(
-        "Kenshi_ScrollViewSkin",
-        MyGUI::IntCoord(pad, pad + 32,
-                        client.width - 2 * pad,
-                        client.height - 32 - 40 - 3 * pad),
-        MyGUI::Align::Stretch);
-    s_list_scroll->setVisibleHScroll(false);
-    s_list_scroll->setVisibleVScroll(true);
+    // Plain Widget as container — rows are positioned explicitly from
+    // y=0 down (no MyGUI auto-layout surprises). Scroll can be added
+    // later as a wrapper ScrollView if the list grows long.
+    MyGUI::IntCoord list_coord(pad, pad + 32,
+                               client.width - 2 * pad,
+                               client.height - 32 - 40 - 3 * pad);
+    try {
+        s_list_scroll = s_window->createWidget<MyGUI::Widget>(
+            "Kenshi_TextBoxEmptySkin",
+            list_coord, MyGUI::Align::Stretch);
+    } catch (const MyGUI::Exception& e) {
+        KMP_LOG(std::string("[KenshiMP] browser: list container failed: ") + e.what());
+        s_list_scroll = NULL;
+    }
 
     int by = client.height - 40 - pad;
     int bx = pad;
     s_btn_direct = s_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(bx, by, 110, 32), MyGUI::Align::Left | MyGUI::Align::Bottom);
     s_btn_direct->setCaption("Direct Connect");
+    s_btn_direct->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_direct->setTextAlign(MyGUI::Align::Center);
     s_btn_direct->eventMouseButtonClick += MyGUI::newDelegate(on_direct);
     bx += 116;
     s_btn_add = s_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(bx, by, 70, 32), MyGUI::Align::Left | MyGUI::Align::Bottom);
     s_btn_add->setCaption("Add");
+    s_btn_add->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_add->setTextAlign(MyGUI::Align::Center);
     s_btn_add->eventMouseButtonClick += MyGUI::newDelegate(on_add);
     bx += 76;
     s_btn_edit = s_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(bx, by, 70, 32), MyGUI::Align::Left | MyGUI::Align::Bottom);
     s_btn_edit->setCaption("Edit");
+    s_btn_edit->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_edit->setTextAlign(MyGUI::Align::Center);
     s_btn_edit->eventMouseButtonClick += MyGUI::newDelegate(on_edit);
     bx += 76;
     s_btn_remove = s_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(bx, by, 80, 32), MyGUI::Align::Left | MyGUI::Align::Bottom);
     s_btn_remove->setCaption("Remove");
+    s_btn_remove->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_remove->setTextAlign(MyGUI::Align::Center);
     s_btn_remove->eventMouseButtonClick += MyGUI::newDelegate(on_remove);
     bx += 86;
     s_btn_join = s_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(bx, by, 80, 32), MyGUI::Align::Left | MyGUI::Align::Bottom);
     s_btn_join->setCaption("Join");
+    s_btn_join->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_btn_join->setTextAlign(MyGUI::Align::Center);
     s_btn_join->eventMouseButtonClick += MyGUI::newDelegate(on_join);
 }
 
@@ -229,32 +436,40 @@ static void create_add_window() {
     s_add_window->setVisible(false);
     s_add_window->eventWindowButtonPressed += MyGUI::newDelegate(on_add_window_button);
 
+    // Dark brown text colour matching the other in-game dialogs (see
+    // ui.cpp). Default text on Kenshi_EditBox / Kenshi_TextBoxEmptySkin
+    // is near-black on dark bg; we force a lighter colour for readability.
+    MyGUI::Colour textCol(0.92f, 0.88f, 0.82f);
+
     const int pad = 8, lx = pad, lw = 80, fx = pad + 90, fw = 210, rowh = 28;
     int y = pad;
     struct L {
         static MyGUI::TextBox* mk(MyGUI::Window* w, int x, int yy, int ww, int hh,
-                                  const char* cap) {
+                                  const char* cap, const MyGUI::Colour& col) {
             MyGUI::TextBox* t = w->createWidget<MyGUI::TextBox>(
                 "Kenshi_TextBoxEmptySkin",
                 MyGUI::IntCoord(x, yy, ww, hh), MyGUI::Align::Default);
             t->setCaption(cap);
             t->setFontName("Kenshi_StandardFont_Medium");
+            t->setTextColour(col);
             return t;
         }
-        static MyGUI::EditBox* mf(MyGUI::Window* w, int x, int yy, int ww, int hh) {
-            return w->createWidget<MyGUI::EditBox>(
+        static MyGUI::EditBox* mf(MyGUI::Window* w, int x, int yy, int ww, int hh,
+                                  const MyGUI::Colour& col) {
+            MyGUI::EditBox* e = w->createWidget<MyGUI::EditBox>(
                 "Kenshi_EditBox",
                 MyGUI::IntCoord(x, yy, ww, hh), MyGUI::Align::Default);
+            e->setFontName("Kenshi_StandardFont_Medium");
+            e->setTextColour(col);
+            return e;
         }
     };
-    L::mk(s_add_window, lx, y, lw, rowh, "Name:");
-    s_add_name = L::mf(s_add_window, fx, y, fw, rowh); y += rowh + 4;
-    L::mk(s_add_window, lx, y, lw, rowh, "Address:");
-    s_add_addr = L::mf(s_add_window, fx, y, fw, rowh); y += rowh + 4;
-    L::mk(s_add_window, lx, y, lw, rowh, "Port:");
-    s_add_port = L::mf(s_add_window, fx, y, fw, rowh); y += rowh + 4;
-    L::mk(s_add_window, lx, y, lw, rowh, "Password:");
-    s_add_pw = L::mf(s_add_window, fx, y, fw, rowh); y += rowh + 8;
+    L::mk(s_add_window, lx, y, lw, rowh, "Name:", textCol);
+    s_add_name = L::mf(s_add_window, fx, y, fw, rowh, textCol); y += rowh + 4;
+    L::mk(s_add_window, lx, y, lw, rowh, "Address:", textCol);
+    s_add_addr = L::mf(s_add_window, fx, y, fw, rowh, textCol); y += rowh + 4;
+    L::mk(s_add_window, lx, y, lw, rowh, "Password:", textCol);
+    s_add_pw = L::mf(s_add_window, fx, y, fw, rowh, textCol); y += rowh + 8;
 
     s_add_err = s_add_window->createWidget<MyGUI::TextBox>(
         "Kenshi_TextBoxEmptySkin",
@@ -266,36 +481,75 @@ static void create_add_window() {
     s_add_ok = s_add_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(pad, y, 90, 30), MyGUI::Align::Default);
     s_add_ok->setCaption("OK");
+    s_add_ok->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_add_ok->setTextAlign(MyGUI::Align::Center);
     s_add_ok->eventMouseButtonClick += MyGUI::newDelegate(on_add_ok);
     s_add_cancel = s_add_window->createWidget<MyGUI::Button>("Kenshi_Button1Skin",
         MyGUI::IntCoord(pad + 100, y, 90, 30), MyGUI::Align::Default);
     s_add_cancel->setCaption("Cancel");
+    s_add_cancel->setFontName("Kenshi_PaintedTextFont_Medium");
+    s_add_cancel->setTextAlign(MyGUI::Align::Center);
     s_add_cancel->eventMouseButtonClick += MyGUI::newDelegate(on_add_cancel);
+}
+
+// Parse "host" or "host:port" into (host, port). Returns false if the
+// port portion is non-numeric or out of range. A missing ":port" yields
+// the default 7777.
+static bool parse_host_port(const std::string& in, std::string& host, uint16_t& port) {
+    size_t colon = in.find(':');
+    if (colon == std::string::npos) {
+        host = in;
+        port = 7777;
+        return !host.empty();
+    }
+    host = in.substr(0, colon);
+    std::string portstr = in.substr(colon + 1);
+    if (host.empty() || portstr.empty()) return false;
+    int p = std::atoi(portstr.c_str());
+    if (p <= 0 || p > 65535) return false;
+    port = static_cast<uint16_t>(p);
+    return true;
 }
 
 static void on_add_ok(MyGUI::Widget*) {
     std::string name = s_add_name->getCaption();
-    std::string addr = s_add_addr->getCaption();
-    std::string portstr = s_add_port->getCaption();
+    std::string addr_in = s_add_addr->getCaption();
     std::string pw = s_add_pw->getCaption();
-    if (name.empty()) { s_add_err->setCaption("Name is required"); return; }
-    if (addr.empty()) { s_add_err->setCaption("Address is required"); return; }
-    int port = std::atoi(portstr.c_str());
-    if (port <= 0 || port > 65535) { s_add_err->setCaption("Port must be 1..65535"); return; }
+
+    std::string host; uint16_t port = 7777;
+    if (!s_add_is_direct && name.empty()) {
+        s_add_err->setCaption("Name is required"); return;
+    }
+    if (addr_in.empty()) { s_add_err->setCaption("Address is required"); return; }
+    if (!parse_host_port(addr_in, host, port)) {
+        s_add_err->setCaption("Address must be host or host:port (1..65535)");
+        return;
+    }
+
+    if (s_add_is_direct) {
+        // No persistence — just trigger the Join flow and close.
+        char logbuf[256];
+        _snprintf(logbuf, sizeof(logbuf),
+            "[KenshiMP] Direct Connect: %s:%u (password %s)",
+            host.c_str(), static_cast<unsigned>(port),
+            pw.empty() ? "(none)" : "provided");
+        KMP_LOG(logbuf);
+        if (s_add_window) s_add_window->setVisible(false);
+        server_browser_close();
+        return;
+    }
 
     if (s_add_is_edit) {
         for (size_t i = 0; i < s_entries.size(); ++i) {
             ServerEntry& e = s_entries[i];
             if (e.id != s_selected_id) continue;
-            e.name = name; e.address = addr;
-            e.port = static_cast<uint16_t>(port); e.password = pw;
+            e.name = name; e.address = host; e.port = port; e.password = pw;
             break;
         }
     } else {
         ServerEntry e;
         e.id = server_list_new_id();
-        e.name = name; e.address = addr;
-        e.port = static_cast<uint16_t>(port); e.password = pw;
+        e.name = name; e.address = host; e.port = port; e.password = pw;
         s_entries.push_back(e);
         s_selected_id = e.id;
     }
@@ -452,12 +706,13 @@ static void rebuild_rows() {
 
     const int row_h = 44;
     int y = 0;
+    int container_w = s_list_scroll->getCoord().width;
     for (size_t i = 0; i < s_entries.size(); ++i) {
         const ServerEntry& e = s_entries[i];
         RowWidgets rw;
         rw.root = s_list_scroll->createWidget<MyGUI::Button>(
             "Kenshi_Button1Skin",
-            MyGUI::IntCoord(0, y, s_list_scroll->getViewCoord().width, row_h),
+            MyGUI::IntCoord(0, y, container_w, row_h),
             MyGUI::Align::HStretch | MyGUI::Align::Top);
         rw.root->setUserString("kmp_row_id", e.id);
         rw.root->setCaption("");
@@ -469,11 +724,13 @@ static void rebuild_rows() {
             MyGUI::IntCoord(4, 2, 580, 20), MyGUI::Align::Default);
         rw.line1->setFontName("Kenshi_StandardFont_Medium");
         rw.line1->setCaption(e.name + "   -   " + format_ping_line(e));
+        rw.line1->setNeedMouseFocus(false);  // clicks pass through to row Button
 
         rw.line2 = rw.root->createWidget<MyGUI::TextBox>(
             "Kenshi_TextBoxEmptySkin",
             MyGUI::IntCoord(4, 22, 580, 18), MyGUI::Align::Default);
         rw.line2->setFontName("Kenshi_StandardFont_Medium");
+        rw.line2->setNeedMouseFocus(false);
         char subbuf[256];
         _snprintf(subbuf, sizeof(subbuf), "%s:%u",
             e.address.c_str(), static_cast<unsigned>(e.port));
@@ -489,7 +746,7 @@ static void rebuild_rows() {
         s_rows[e.id] = rw;
         y += row_h + 2;
     }
-    s_list_scroll->setCanvasSize(s_list_scroll->getViewCoord().width, y);
+    // No setCanvasSize — s_list_scroll is a plain Widget, not a ScrollView.
 }
 
 static void apply_ping_to_row(const std::string& id) {
@@ -533,17 +790,77 @@ void server_browser_shutdown() {
 
 void server_browser_open() {
     if (s_open) return;
-    create_main_window();
-    if (!s_window) return;
-    create_add_window();
+    try {
+        create_main_window();
+    } catch (const MyGUI::Exception& e) {
+        KMP_LOG(std::string("[KenshiMP] browser: create_main_window threw: ") + e.what());
+        return;
+    } catch (const std::exception& e) {
+        KMP_LOG(std::string("[KenshiMP] browser: create_main_window std exception: ") + e.what());
+        return;
+    }
+    if (!s_window) {
+        KMP_LOG("[KenshiMP] browser: s_window null after create_main_window");
+        return;
+    }
+    try {
+        create_add_window();
+    } catch (const MyGUI::Exception& e) {
+        KMP_LOG(std::string("[KenshiMP] browser: create_add_window threw: ") + e.what());
+        // Add window is optional — main window can still show.
+    }
 
     s_entries.clear();
     server_list_load(s_entries);
 
     s_selected_id.clear();
     s_open = true;
+
+    // Hide the entire TitleScreen widget so our Gui-root browser is the
+    // only thing visible. Log each child we hide for diagnostic, so if
+    // the user still sees TitleScreen captions we know those widgets
+    // are outside this subtree and need separate handling.
+    MyGUI::Widget* ts_root = title_screen_root();
+    s_ts_hidden_children.clear();
+    if (ts_root) {
+        TSChildSnap root_snap;
+        root_snap.w = ts_root;
+        root_snap.was_visible = ts_root->getVisible();
+        s_ts_hidden_children.push_back(root_snap);
+        ts_root->setVisible(false);
+
+        int counted = 0;
+        MyGUI::EnumeratorWidgetPtr it = ts_root->getEnumerator();
+        while (it.next()) {
+            MyGUI::Widget* child = it.current();
+            if (!child) continue;
+            TSChildSnap snap;
+            snap.w = child;
+            snap.was_visible = child->getVisible();
+            s_ts_hidden_children.push_back(snap);
+            if (snap.was_visible) child->setVisible(false);
+            counted++;
+        }
+        char dbg[96];
+        _snprintf(dbg, sizeof(dbg),
+            "[KenshiMP] browser: hid TitleScreen root + %d direct children",
+            counted);
+        KMP_LOG(dbg);
+    }
+
     s_window->setVisible(true);
-    MyGUI::LayerManager::getInstance().upLayerItem(s_window);
+    try {
+        MyGUI::LayerManager::getInstance().upLayerItem(s_window);
+    } catch (...) { }
+
+    // Log visibility / coord so we can verify rendering state.
+    MyGUI::IntCoord c = s_window->getCoord();
+    char dbg[128];
+    _snprintf(dbg, sizeof(dbg),
+        "[KenshiMP] browser: s_window visible=%d coord=%d,%d %dx%d",
+        (int)s_window->getVisible(), c.left, c.top, c.width, c.height);
+    KMP_LOG(dbg);
+
     rebuild_rows();
     update_button_states();
     start_all_pings();
@@ -551,10 +868,29 @@ void server_browser_open() {
 
 void server_browser_close() {
     if (!s_open) return;
+    // If we're mid-connect, Close is a no-op. User must hit Cancel in
+    // the connecting modal first. This also means the X button on the
+    // browser caption is effectively disabled while connecting.
+    if (s_connecting_visible) {
+        KMP_LOG("[KenshiMP] browser close blocked — connection in progress");
+        return;
+    }
     s_open = false;
     stop_all_pings();
     if (s_window) s_window->setVisible(false);
+    if (s_backdrop) s_backdrop->setVisible(false);
     if (s_add_window) s_add_window->setVisible(false);
+    hide_connecting_modal();
+
+    // Restore TitleScreen root + children we hid (in reverse order so
+    // parent goes back visible before children trigger re-render).
+    for (size_t i = s_ts_hidden_children.size(); i > 0; --i) {
+        MyGUI::Widget* w = s_ts_hidden_children[i - 1].w;
+        if (w && s_ts_hidden_children[i - 1].was_visible) {
+            w->setVisible(true);
+        }
+    }
+    s_ts_hidden_children.clear();
 }
 
 bool server_browser_is_open() { return s_open; }
@@ -562,6 +898,16 @@ bool server_browser_is_open() { return s_open; }
 void server_browser_tick(float /*dt*/) {
     if (!s_open) return;
     poll_ping_events();
+    update_connecting_caption();  // animates "Connecting." -> ".." -> "..."
+
+    // Keep the connecting modal permanently frontmost. Clicking the main
+    // browser (even disabled) can raise its window above the modal
+    // otherwise — this forces the modal back on top every tick.
+    if (s_connecting_visible && s_connecting_window) {
+        try {
+            MyGUI::LayerManager::getInstance().upLayerItem(s_connecting_window);
+        } catch (...) { }
+    }
 }
 
 } // namespace kmp
