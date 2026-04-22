@@ -84,3 +84,11 @@ target_include_directories(test-server-list PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test-server-list PRIVATE kenshi-mp-common)
 target_compile_features(test-server-list PRIVATE cxx_std_17)
+
+add_executable(test-server-pinger test_server_pinger.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/server_pinger.cpp)
+target_include_directories(test-server-pinger PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/common/include)
+target_link_libraries(test-server-pinger PRIVATE kenshi-mp-common)
+target_compile_features(test-server-pinger PRIVATE cxx_std_17)
