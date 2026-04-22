@@ -108,3 +108,14 @@ endif()
 add_executable(test-connect-request-password test_connect_request_password.cpp)
 target_link_libraries(test-connect-request-password PRIVATE kenshi-mp-common)
 target_compile_features(test-connect-request-password PRIVATE cxx_std_17)
+
+set_source_files_properties(${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c PROPERTIES LANGUAGE C)
+add_executable(test-snapshot-extract test_snapshot_extract.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_extract.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_zip.cpp
+    ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c)
+target_include_directories(test-snapshot-extract PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/deps/miniz)
+target_link_libraries(test-snapshot-extract PRIVATE kenshi-mp-common)
+target_compile_features(test-snapshot-extract PRIVATE cxx_std_17)

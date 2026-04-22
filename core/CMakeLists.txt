@@ -17,6 +17,7 @@ add_library(KenshiMP SHARED
     src/client_identity.cpp
     src/save_trigger.cpp
     src/snapshot_zip.cpp
+    src/snapshot_extract.cpp
     src/snapshot_uploader.cpp
     src/snapshot_uploader_glue.cpp
     src/snapshot_client.cpp
