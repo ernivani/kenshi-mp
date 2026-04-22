@@ -51,6 +51,8 @@ extern uint32_t client_get_local_id();
 extern void client_send_reliable(const uint8_t* data, size_t length);
 extern void player_sync_set_requested_host(bool val);
 extern bool host_sync_is_host();
+extern void snapshot_uploader_glue_start(const std::string& slot);
+extern std::string snapshot_uploader_glue_progress_text();
 extern Character* game_get_player_character();
 extern Character* npc_manager_get_player_avatar(uint32_t player_id);
 extern void       npc_manager_list_remote_players(std::vector<uint32_t>& out);
@@ -436,6 +438,11 @@ void ui_on_connect_accept(uint32_t player_id) {
     // Show chat window whenever connected, regardless of the connect-dialog toggle.
     if (s_chat_window) {
         s_chat_window->setVisible(true);
+    }
+
+    if (host_sync_is_host()) {
+        KMP_LOG("[KenshiMP] host connected — beginning snapshot upload");
+        snapshot_uploader_glue_start("KMP_Session");
     }
 }
 
@@ -851,9 +858,12 @@ static void update_status_text() {
 
     if (client_is_connected()) {
         std::string role = host_sync_is_host() ? "HOSTING" : "JOINED";
-        s_status_text->setCaption(
-            "KenshiMP - " + role + " as Player #" + itos(client_get_local_id())
-        );
+        std::string base = "KenshiMP - " + role + " as Player #" + itos(client_get_local_id());
+        std::string extra = snapshot_uploader_glue_progress_text();
+        if (!extra.empty()) {
+            base += "  \xC2\xB7  " + extra;
+        }
+        s_status_text->setCaption(base);
         s_status_text->setTextColour(MyGUI::Colour(0.4f, 1.0f, 0.4f));
     } else {
         s_status_text->setCaption("KenshiMP - Disconnected  (F8: connect)");

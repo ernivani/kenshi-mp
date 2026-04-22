@@ -24,6 +24,8 @@ namespace kmp {
     void ui_init();
     void ui_shutdown();
     void ui_update_main_menu_button();
+    void snapshot_uploader_glue_init();
+    void snapshot_uploader_glue_shutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
         // ui_init may have already run from the TitleScreen hook — it's a
         // no-op when s_ui_initialized is true (see ui.cpp).
         if (!s_title_ui_inited) kmp::ui_init();
+        kmp::snapshot_uploader_glue_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 

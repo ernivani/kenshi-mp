@@ -95,6 +95,9 @@ extern void ui_on_disconnect();
 extern void ui_check_hotkey();
 extern void ui_update_main_menu_button();
 
+extern void snapshot_uploader_glue_tick(float dt);
+extern void snapshot_uploader_glue_on_ack(const SnapshotUploadAck& ack);
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -381,6 +384,14 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::SNAPSHOT_UPLOAD_ACK: {
+        SnapshotUploadAck pkt;
+        if (unpack(data, length, pkt)) {
+            snapshot_uploader_glue_on_ack(pkt);
+        }
+        break;
+    }
+
     default:
         break;
     }
@@ -425,6 +436,7 @@ void player_sync_tick(float dt) {
     ui_update_main_menu_button();
     admin_panel_check_hotkey();
     admin_panel_update(dt);
+    snapshot_uploader_glue_tick(dt);
 
     // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)
 
