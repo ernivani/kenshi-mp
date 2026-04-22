@@ -176,6 +176,21 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
         return;
     }
 
+    // Password gate. If the server has a password configured and the
+    // client's password doesn't match, reject.
+    if (s_server_config && !s_server_config->password.empty()) {
+        if (std::strcmp(req.password, s_server_config->password.c_str()) != 0) {
+            ConnectReject reject;
+            safe_strcpy(reject.reason, "wrong password");
+            auto buf = pack(reject);
+            relay_send_to(peer, buf.data(), buf.size(), true);
+            enet_peer_disconnect_later(peer, 0);
+            spdlog::info("CONNECT rejected: wrong password from {}",
+                         peer->address.host);
+            return;
+        }
+    }
+
     // Resolve stable player id from client_uuid. If the UUID is known, reuse
     // the same id so reconnects don't create a fresh identity. If the owner of
     // that id is still connected (e.g. two clients using the same UUID), fall

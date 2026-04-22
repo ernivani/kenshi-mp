@@ -104,3 +104,7 @@ if(ENET_DIR)
         ${ENET_DIR}/lib ${ENET_DIR}/build/Release ${ENET_DIR}/build/Debug)
     target_link_libraries(test-server-info-e2e PRIVATE enet)
 endif()
+
+add_executable(test-connect-request-password test_connect_request_password.cpp)
+target_link_libraries(test-connect-request-password PRIVATE kenshi-mp-common)
+target_compile_features(test-connect-request-password PRIVATE cxx_std_17)

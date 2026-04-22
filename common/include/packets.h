@@ -77,6 +77,7 @@ struct ConnectRequest {
     // first run) and persists it; the server maps uuid → player_id so a player
     // who reconnects gets the same id as before.
     char         client_uuid[64];
+    char         password[MAX_PASSWORD_LENGTH];   // "" = no password provided
 
     ConnectRequest() {
         std::memset(this, 0, sizeof(*this));
