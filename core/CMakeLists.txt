@@ -19,6 +19,7 @@ add_library(KenshiMP SHARED
     src/snapshot_zip.cpp
     src/snapshot_uploader.cpp
     src/snapshot_uploader_glue.cpp
+    src/snapshot_client.cpp
     src/server_list.cpp
     src/server_pinger.cpp
     src/server_browser.cpp
@@ -85,4 +86,4 @@ if(ENET_DIR)
 endif()
 
 # Windows libs
-target_link_libraries(KenshiMP PRIVATE ws2_32 winmm shell32)
+target_link_libraries(KenshiMP PRIVATE ws2_32 winmm shell32 winhttp)
