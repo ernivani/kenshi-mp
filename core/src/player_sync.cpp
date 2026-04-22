@@ -99,6 +99,8 @@ extern void ui_tick();
 extern void snapshot_uploader_glue_tick(float dt);
 extern void snapshot_uploader_glue_on_ack(const SnapshotUploadAck& ack);
 
+extern void server_browser_tick(float dt);
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -438,6 +440,7 @@ void player_sync_tick(float dt) {
     admin_panel_check_hotkey();
     admin_panel_update(dt);
     snapshot_uploader_glue_tick(dt);
+    server_browser_tick(dt);
     ui_tick();
 
     // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)

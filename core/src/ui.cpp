@@ -59,6 +59,8 @@ extern Character* game_get_player_character();
 extern Character* npc_manager_get_player_avatar(uint32_t player_id);
 extern void       npc_manager_list_remote_players(std::vector<uint32_t>& out);
 
+extern void server_browser_open();
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -604,12 +606,9 @@ static void do_connect(bool as_host) {
     }
 }
 
-static void on_mp_menu_clicked(MyGUI::Widget* sender) {
-    if (!s_connect_window) return;
-    // Bring the connect dialog up on top of the title screen.
-    s_ui_visible = true;
-    s_connect_window->setVisible(true);
-    MyGUI::LayerManager::getInstance().upLayerItem(s_connect_window);
+static void on_mp_menu_clicked(MyGUI::Widget* /*sender*/) {
+    KMP_LOG("[KenshiMP] Multiplayer button - open server browser");
+    server_browser_open();
 }
 
 static void on_host_clicked(MyGUI::Widget* sender) {

@@ -26,6 +26,8 @@ namespace kmp {
     void ui_update_main_menu_button();
     void snapshot_uploader_glue_init();
     void snapshot_uploader_glue_shutdown();
+    void server_browser_init();
+    void server_browser_shutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
         // no-op when s_ui_initialized is true (see ui.cpp).
         if (!s_title_ui_inited) kmp::ui_init();
         kmp::snapshot_uploader_glue_init();
+        kmp::server_browser_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 
