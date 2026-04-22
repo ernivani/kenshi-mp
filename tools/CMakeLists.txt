@@ -119,3 +119,11 @@ target_include_directories(test-snapshot-extract PRIVATE
     ${CMAKE_SOURCE_DIR}/deps/miniz)
 target_link_libraries(test-snapshot-extract PRIVATE kenshi-mp-common)
 target_compile_features(test-snapshot-extract PRIVATE cxx_std_17)
+
+add_executable(test-joiner-runtime test_joiner_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/joiner_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/server_list.cpp)
+target_include_directories(test-joiner-runtime PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(test-joiner-runtime PRIVATE kenshi-mp-common)
+target_compile_features(test-joiner-runtime PRIVATE cxx_std_17)

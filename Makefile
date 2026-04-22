@@ -151,7 +151,7 @@ SNAPSHOT_UNIT_TESTS := test-snapshot-packets test-snapshot-store \
                        test-snapshot-zip test-snapshot-uploader \
                        test-server-info-packets test-server-list \
                        test-server-pinger test-connect-request-password \
-                       test-snapshot-extract
+                       test-snapshot-extract test-joiner-runtime
 SNAPSHOT_E2E_TESTS  := test-snapshot-e2e test-server-info-e2e
 
 test: $(BUILD_SERVER)/CMakeCache.txt
