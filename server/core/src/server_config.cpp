@@ -22,6 +22,8 @@ ServerConfig load_config(const std::string& path) {
         if (j.contains("max_players"))   cfg.max_players   = j["max_players"];
         if (j.contains("server_name"))   cfg.server_name   = j["server_name"];
         if (j.contains("view_distance")) cfg.view_distance = j["view_distance"];
+        if (j.contains("description")) cfg.description = j["description"].get<std::string>();
+        if (j.contains("password"))    cfg.password    = j["password"].get<std::string>();
     } catch (const json::exception& e) {
         spdlog::warn("Failed to parse config: {}", e.what());
     }
@@ -35,6 +37,8 @@ bool save_config(const std::string& path, const ServerConfig& cfg) {
         j["max_players"]   = cfg.max_players;
         j["server_name"]   = cfg.server_name;
         j["view_distance"] = cfg.view_distance;
+        j["description"] = cfg.description;
+        j["password"]    = cfg.password;
         std::ofstream file(path);
         if (!file.is_open()) {
             spdlog::error("Failed to open '{}' for writing", path);

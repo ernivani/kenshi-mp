@@ -12,6 +12,8 @@ struct ServerConfig {
     uint32_t    max_players   = MAX_PLAYERS;
     std::string server_name   = "KenshiMP Server";
     float       view_distance = 5000.0f;
+    std::string description;         // advertised in SERVER_INFO_REPLY; "" = no description
+    std::string password;            // "" = no password required
 };
 
 ServerConfig load_config(const std::string& path);
