@@ -32,6 +32,13 @@ public:
 
 namespace kmp {
 
+extern void joiner_runtime_glue_start(const ServerEntry& entry);
+extern void joiner_runtime_glue_cancel();
+extern int  joiner_runtime_glue_state_int();
+extern std::string joiner_runtime_glue_stage_label();
+extern std::string joiner_runtime_glue_progress_text();
+extern std::string joiner_runtime_glue_last_error();
+
 namespace {
 
 struct RowWidgets {
@@ -269,11 +276,26 @@ static void on_connecting_cancel(MyGUI::Widget*);
 
 static void update_connecting_caption() {
     if (!s_connecting_visible || !s_connecting_label) return;
+    int st = joiner_runtime_glue_state_int();
+    std::string stage = joiner_runtime_glue_stage_label();
+    std::string progress = joiner_runtime_glue_progress_text();
+
     ULONGLONG elapsed = GetTickCount64() - s_connecting_since_ms;
-    int dots = (int)((elapsed / 500) % 3) + 1;  // 1, 2, 3, 1, 2, 3, ...
+    int dots = (int)((elapsed / 500) % 3) + 1;
     const char* dot_str = (dots == 1) ? "." : (dots == 2) ? ".." : "...";
-    std::string caption = "Connecting" + std::string(dot_str) +
-                          "\n\n" + s_connecting_server_line;
+
+    std::string caption;
+    // State enum order: 0=Idle 1=Downloading 2=Extracting 3=LoadTrigger
+    // 4=LoadWait 5=EnetConnect 6=AwaitAccept 7=Done 8=Cancelled 9=Failed.
+    if (st == 9) {
+        caption = "Error: " + joiner_runtime_glue_last_error();
+    } else if (st == 7 || st == 8) {
+        caption = std::string();
+    } else {
+        caption = stage + dot_str;
+        if (!progress.empty()) caption += std::string("\n") + progress;
+        caption += "\n\n" + s_connecting_server_line;
+    }
     s_connecting_label->setCaption(caption);
 }
 
@@ -347,6 +369,7 @@ static void hide_connecting_modal() {
 
 static void on_connecting_cancel(MyGUI::Widget*) {
     KMP_LOG("[KenshiMP] Join cancelled by user");
+    joiner_runtime_glue_cancel();
     hide_connecting_modal();
 }
 
@@ -356,13 +379,13 @@ static void on_join(MyGUI::Widget*) {
         if (e.id != s_selected_id) continue;
         char logbuf[256];
         _snprintf(logbuf, sizeof(logbuf),
-            "[KenshiMP] Join clicked: '%s' @ %s:%u",
+            "[KenshiMP] Join: '%s' @ %s:%u",
             e.name.c_str(), e.address.c_str(), static_cast<unsigned>(e.port));
         KMP_LOG(logbuf);
         show_connecting_modal(e);
+        joiner_runtime_glue_start(e);
         break;
     }
-    // Don't close the browser; show the connecting modal on top instead.
 }
 
 // Get TitleScreen's main widget via BaseLayout::mMainWidget at offset 0x38.
@@ -968,6 +991,12 @@ void server_browser_tick(float /*dt*/) {
         try {
             MyGUI::LayerManager::getInstance().upLayerItem(s_connecting_window);
         } catch (...) { }
+    }
+
+    int st = joiner_runtime_glue_state_int();
+    if (s_connecting_visible && st == 7 /*Done*/) {
+        hide_connecting_modal();
+        server_browser_close();
     }
 }
 

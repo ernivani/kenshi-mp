@@ -100,6 +100,8 @@ extern void snapshot_uploader_glue_tick(float dt);
 extern void snapshot_uploader_glue_on_ack(const SnapshotUploadAck& ack);
 
 extern void server_browser_tick(float dt);
+extern void joiner_runtime_glue_on_connect_accept(uint32_t player_id);
+extern void joiner_runtime_glue_on_connect_reject(const std::string& reason);
 
 // ---------------------------------------------------------------------------
 // State
@@ -188,6 +190,16 @@ static void on_packet_received(const uint8_t* data, size_t length) {
                 }
             }
             ui_on_connect_accept(pkt.player_id);
+            joiner_runtime_glue_on_connect_accept(pkt.player_id);
+        }
+        break;
+    }
+
+    case PacketType::CONNECT_REJECT: {
+        ConnectReject pkt;
+        if (unpack(data, length, pkt)) {
+            KMP_LOG(std::string("[KenshiMP] CONNECT_REJECT: ") + pkt.reason);
+            joiner_runtime_glue_on_connect_reject(pkt.reason);
         }
         break;
     }

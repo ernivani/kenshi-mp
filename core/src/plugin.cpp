@@ -29,6 +29,9 @@ namespace kmp {
     void server_browser_init();
     void server_browser_shutdown();
     void server_browser_tick(float dt);
+    void joiner_runtime_glue_init();
+    void joiner_runtime_glue_shutdown();
+    void joiner_runtime_glue_tick(float dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,7 @@ static void hooked_title_update(void* self) {
     // lives, so we tick here. dt is approximate (title-screen hook doesn't
     // pass real dt); 1/60s is fine for network-grade timing.
     kmp::server_browser_tick(0.016f);
+    kmp::joiner_runtime_glue_tick(0.016f);
 }
 
 static void hooked_main_loop(GameWorld* world, float time) {
@@ -82,6 +86,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
         if (!s_title_ui_inited) kmp::ui_init();
         kmp::snapshot_uploader_glue_init();
         kmp::server_browser_init();
+        kmp::joiner_runtime_glue_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 
