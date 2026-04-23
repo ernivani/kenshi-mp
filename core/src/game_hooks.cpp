@@ -44,6 +44,71 @@ GameWorld* game_get_world() {
 
 extern bool npc_manager_is_player_npc(Character* ch);
 
+// Serialize the local PlayerInterface squad into a byte blob by
+// saving to a temp file (Kenshi's GameData API is file-based) then
+// reading the file back. Temp file is deleted on the way out. Returns
+// empty vector on failure.
+static std::string temp_char_path() {
+    char tmp[MAX_PATH] = {0};
+    DWORD n = GetTempPathA(MAX_PATH, tmp);
+    std::string dir = (n > 0 && n < MAX_PATH) ? std::string(tmp) : std::string(".\\");
+    return dir + "KenshiMP_char_" +
+        std::to_string(static_cast<unsigned long long>(GetCurrentProcessId())) +
+        ".dat";
+}
+
+std::vector<uint8_t> game_serialize_player_state() {
+    std::vector<uint8_t> out;
+    if (!ou || !ou->player) return out;
+
+    std::string path = temp_char_path();
+    GameDataCopyStandalone gd;
+    gd.initialise(CHARACTER, false);
+    ou->player->serialise(&gd);
+    bool saved = gd.saveToFile(path);
+    gd.destroy();
+    if (!saved) {
+        DeleteFileA(path.c_str());
+        return out;
+    }
+
+    FILE* f = NULL;
+    if (fopen_s(&f, path.c_str(), "rb") == 0 && f) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 0) {
+            out.resize(static_cast<size_t>(sz));
+            size_t got = fread(out.data(), 1, out.size(), f);
+            if (got != out.size()) out.clear();
+        }
+        fclose(f);
+    }
+    DeleteFileA(path.c_str());
+    return out;
+}
+
+// Inverse: write the blob to a temp file, call GameData::loadFromFile
+// + PlayerInterface::loadFromSerialise. Returns true on success.
+bool game_apply_player_state(const uint8_t* blob, size_t len) {
+    if (!ou || !ou->player) return false;
+    if (!blob || len == 0) return false;
+
+    std::string path = temp_char_path();
+    FILE* f = NULL;
+    if (fopen_s(&f, path.c_str(), "wb") != 0 || !f) return false;
+    size_t put = fwrite(blob, 1, len, f);
+    fclose(f);
+    if (put != len) { DeleteFileA(path.c_str()); return false; }
+
+    GameDataCopyStandalone gd;
+    bool ok = gd.loadFromFile(path, CHARACTER);
+    if (ok) ou->player->loadFromSerialise(&gd);
+    gd.destroy();
+    DeleteFileA(path.c_str());
+    return ok;
+}
+
 // Spawn a blank character in the local player faction. Used after a
 // snapshot join so the joiner has something to control. Tries a list of
 // common Kenshi character template names; falls back to random if none

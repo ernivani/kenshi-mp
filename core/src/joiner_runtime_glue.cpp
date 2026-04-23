@@ -2,6 +2,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <shlobj.h>
 
 #include <cstring>
 #include <memory>
@@ -25,6 +26,8 @@ namespace kmp {
     extern void client_send_reliable(const uint8_t* data, size_t length);
     extern void client_poll();
     extern void server_browser_force_close_for_load();
+    extern bool game_save_player_state(const std::string& path);
+    extern bool game_load_player_state(const std::string& path);
 }
 
 namespace kmp {
@@ -267,6 +270,26 @@ static bool poll_extract_bg(bool& ok) {
     if (InterlockedCompareExchange(&s_ex_job->done, 0, 0) == 0) return false;
     ok = InterlockedCompareExchange(&s_ex_job->succeeded, 0, 0) != 0;
     return true;
+}
+
+static std::string resolve_char_path_real(const std::string& entry_id) {
+    char path[MAX_PATH] = {0};
+    if (FAILED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
+        return std::string();
+    }
+    std::string dir = std::string(path) + "\\KenshiMP\\characters";
+    // Create both KenshiMP and characters subdir (idempotent).
+    CreateDirectoryA((std::string(path) + "\\KenshiMP").c_str(), NULL);
+    CreateDirectoryA(dir.c_str(), NULL);
+    // Sanitize entry_id (strip path separators just in case).
+    std::string safe = entry_id;
+    for (size_t i = 0; i < safe.size(); ++i) {
+        char c = safe[i];
+        if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' ||
+            c == '"' || c == '<' || c == '>' || c == '|') safe[i] = '_';
+    }
+    if (safe.empty()) safe = "default";
+    return dir + "\\" + safe + ".dat";
 }
 
 static bool connect_enet_real(const std::string& host, uint16_t port) {

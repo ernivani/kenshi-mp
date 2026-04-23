@@ -52,6 +52,13 @@ namespace PacketType {
     // gate. See docs/superpowers/specs/2026-04-22-server-browser-ui-design.md
     static const uint8_t SERVER_INFO_REQUEST = 0xB0;
     static const uint8_t SERVER_INFO_REPLY   = 0xB1;
+    // Per-server character persistence. Joiner serializes its
+    // PlayerInterface squad state and uploads to the server; the server
+    // persists by client_uuid. On reconnect, server sends the stored
+    // blob back so the joiner restores the exact same squad instead of
+    // spawning a fresh Wanderer.
+    static const uint8_t CHARACTER_UPLOAD    = 0xC0;
+    static const uint8_t CHARACTER_RESTORE   = 0xC1;
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +447,35 @@ struct ServerInfoReply {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::SERVER_INFO_REPLY;
+    }
+};
+
+// Joiner-side → server: upload the serialized PlayerInterface blob
+// (Kenshi's GameData binary form) so the server can persist the
+// joiner's squad across sessions. Wire: {CharacterUpload}{<blob_size> bytes}.
+// Send via pack_with_tail, unpack with unpack_with_tail.
+struct CharacterUpload {
+    PacketHeader header;
+    uint32_t     blob_size;
+
+    CharacterUpload() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_UPLOAD;
+    }
+};
+
+// Server → joiner: after CONNECT_ACCEPT, if the server has a blob
+// stored for this UUID, send it so the client restores the squad
+// instead of spawning a fresh one. Same wire layout as CharacterUpload.
+struct CharacterRestore {
+    PacketHeader header;
+    uint32_t     blob_size;
+
+    CharacterRestore() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_RESTORE;
     }
 };
 

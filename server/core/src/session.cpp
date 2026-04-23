@@ -24,6 +24,7 @@
 #include "spawn.h"
 #include "snapshot.h"
 #include "snapshot_upload.h"
+#include "character_store.h"
 
 namespace kmp {
 
@@ -50,6 +51,7 @@ struct PlayerSession {
     uint32_t    last_animation_id;
     uint8_t     last_posture_flags;
     std::chrono::steady_clock::time_point last_activity;
+    std::string client_uuid;  // for per-player character persistence
 };
 
 static std::map<uint32_t, PlayerSession>   s_sessions;        // id -> session
@@ -228,6 +230,7 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     session.last_posture_flags = 0;
     session.last_activity = std::chrono::steady_clock::now();
     session.is_host = (req.is_host != 0);
+    session.client_uuid = uuid;
     if (session.is_host && s_host_id == 0) {
         s_host_id = id;
         spdlog::info("Player {} is the HOST", id);
@@ -244,6 +247,21 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     accept.player_id = id;
     auto buf_accept = pack(accept);
     relay_send_to(peer, buf_accept.data(), buf_accept.size(), true);
+
+    // If we have a persisted character for this UUID, send it so the
+    // joiner can restore their squad instead of spawning a fresh one.
+    // Hosts don't need this (they load from their own save).
+    if (!session.is_host && !uuid.empty()) {
+        std::vector<uint8_t> blob;
+        if (character_store_get(uuid, blob) && !blob.empty()) {
+            CharacterRestore hdr;
+            hdr.blob_size = static_cast<uint32_t>(blob.size());
+            auto buf = pack_with_tail(hdr, blob.data(), blob.size());
+            relay_send_to(peer, buf.data(), buf.size(), true);
+            spdlog::info("CHARACTER_RESTORE sent to player {} ({} bytes)",
+                         id, blob.size());
+        }
+    }
 
     // Tell the new player about all existing players
     for (auto& pair : s_sessions) {
@@ -627,6 +645,24 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         } else {
             spdlog::warn("Snapshot upload rejected: err={}", ack.error_code);
         }
+        break;
+    }
+    case PacketType::CHARACTER_UPLOAD: {
+        CharacterUpload hdr;
+        const uint8_t* tail = nullptr;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, hdr, tail, tail_len)) break;
+        if (tail_len < hdr.blob_size) break;  // truncated
+        auto it = s_peer_to_id.find(peer);
+        if (it == s_peer_to_id.end()) break;
+        auto sit = s_sessions.find(it->second);
+        if (sit == s_sessions.end()) break;
+        if (sit->second.client_uuid.empty()) {
+            spdlog::warn("CHARACTER_UPLOAD from player {} ignored "
+                         "(no client_uuid)", sit->second.id);
+            break;
+        }
+        character_store_set(sit->second.client_uuid, tail, hdr.blob_size);
         break;
     }
     default:

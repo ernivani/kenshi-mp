@@ -12,6 +12,7 @@ add_library(kenshi-mp-server-core SHARED
     src/server_config.cpp
     src/admin.cpp
     src/spawn.cpp
+    src/character_store.cpp
 )
 
 target_compile_features(kenshi-mp-server-core PRIVATE cxx_std_17)

@@ -20,6 +20,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include "admin.h"
+#include "character_store.h"
 #include "events.h"
 #include "protocol.h"
 #include "server_config.h"
@@ -106,6 +107,7 @@ static void worker_main(kmp::ServerConfig cfg) {
 
     kmp::world_state_init();
     kmp::session_init();
+    kmp::character_store_init();
 
     // Snapshot store + HTTP sidecar. The store is in-RAM; the sidecar binds
     // port+1 on a worker thread and serves GET /snapshot to joiners.

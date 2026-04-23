@@ -114,7 +114,12 @@ const std::string& client_identity_get_name() {
 const std::string& client_identity_get_model() {
     load_character_once();
     if (s_char_model.empty()) {
-        static const std::string kDefault = "greenlander";
+        // "Wanderer" exists as a Kenshi CHARACTER GameData (verified via
+        // ou->gamedata.getDataByName); "greenlander" does not — it's only
+        // a race. Sending "Wanderer" makes the host spawn the joiner's
+        // remote NPC with a proper template (tmpl=Wanderer in logs)
+        // instead of falling back to random.
+        static const std::string kDefault = "Wanderer";
         return kDefault;
     }
     return s_char_model;

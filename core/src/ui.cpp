@@ -591,7 +591,7 @@ static void do_connect(bool as_host) {
         std::string display = as_host ? "Host" : ("Player-" + suffix);
         std::strncpy(req.name, display.c_str(), MAX_NAME_LENGTH - 1);
         req.name[MAX_NAME_LENGTH - 1] = '\0';
-        std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+        std::strncpy(req.model, "Wanderer", MAX_MODEL_LENGTH - 1);
         req.model[MAX_MODEL_LENGTH - 1] = '\0';
         req.is_host = as_host ? 1 : 0;
         std::strncpy(req.client_uuid, client_identity_get_uuid(), sizeof(req.client_uuid) - 1);

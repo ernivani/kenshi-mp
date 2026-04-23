@@ -438,6 +438,27 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::CHARACTER_RESTORE: {
+        CharacterRestore pkt;
+        const uint8_t* tail = NULL;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, pkt, tail, tail_len)) break;
+        if (tail_len < pkt.blob_size) break;
+        extern bool game_apply_player_state(const uint8_t*, size_t);
+        extern void player_sync_cancel_squad_destroy();
+        // Cancel the scheduled destroy — the restore blob replaces the
+        // PlayerInterface squad with our previously-saved one. Destroying
+        // after restore would nuke the restored characters.
+        player_sync_cancel_squad_destroy();
+        bool ok = game_apply_player_state(tail, pkt.blob_size);
+        char logbuf[128];
+        _snprintf(logbuf, sizeof(logbuf),
+            "[KenshiMP] CHARACTER_RESTORE received %u bytes applied=%d",
+            pkt.blob_size, ok ? 1 : 0);
+        KMP_LOG(logbuf);
+        break;
+    }
+
     default:
         break;
     }
@@ -475,6 +496,14 @@ void player_sync_schedule_squad_destroy() {
     s_pending_squad_destroy = true;
     s_pending_squad_destroy_timeout = 30.0f; // seconds
     KMP_LOG("[KenshiMP] snapshot join: squad destroy scheduled");
+}
+
+void player_sync_cancel_squad_destroy() {
+    if (s_pending_squad_destroy) {
+        KMP_LOG("[KenshiMP] snapshot join: squad destroy cancelled "
+                "(CHARACTER_RESTORE took over)");
+    }
+    s_pending_squad_destroy = false;
 }
 
 void player_sync_tick(float dt) {
@@ -573,7 +602,7 @@ void player_sync_tick(float dt) {
                 ConnectRequest req;
                 std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
                 req.name[MAX_NAME_LENGTH - 1] = '\0';
-                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+                std::strncpy(req.model, "Wanderer", MAX_MODEL_LENGTH - 1);
                 req.model[MAX_MODEL_LENGTH - 1] = '\0';
                 req.is_host = s_requested_host ? 1 : 0;
                 std::vector<uint8_t> buf = pack(req);
@@ -597,6 +626,33 @@ void player_sync_tick(float dt) {
 
     // Rest of the tick needs the local player to exist.
     if (!game_is_world_loaded()) return;
+
+    // Joiners: periodically upload our serialized squad to the server so
+    // it can send it back on our next reconnect (character persistence).
+    // First upload ~8 s after connect to let initial spawn settle; then
+    // every 30 s.
+    if (!s_requested_host &&
+        joiner_runtime_glue_did_snapshot_join()) {
+        static float s_upload_timer = 22.0f;  // -> first fire at +8 s
+        s_upload_timer += dt;
+        if (s_upload_timer >= 30.0f) {
+            s_upload_timer = 0.0f;
+            extern std::vector<uint8_t> game_serialize_player_state();
+            std::vector<uint8_t> blob = game_serialize_player_state();
+            if (!blob.empty()) {
+                CharacterUpload hdr;
+                hdr.blob_size = static_cast<uint32_t>(blob.size());
+                std::vector<uint8_t> packed = pack_with_tail(
+                    hdr, blob.data(), blob.size());
+                client_send_reliable(packed.data(), packed.size());
+                char logbuf[96];
+                _snprintf(logbuf, sizeof(logbuf),
+                    "[KenshiMP] CHARACTER_UPLOAD sent %u bytes",
+                    hdr.blob_size);
+                KMP_LOG(logbuf);
+            }
+        }
+    }
 
     // Host: scan and send NPC state to server
     // (disabled — joiner should only see remote player avatars, not host's NPCs)
