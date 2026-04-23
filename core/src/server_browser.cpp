@@ -977,6 +977,43 @@ void server_browser_close() {
     s_ts_hidden_children.clear();
 }
 
+// Force-destroy all our browser/connecting widgets and restore TitleScreen,
+// even mid-connect. Used by the joiner right before SaveManager::loadGame —
+// just hiding isn't enough: loadGame internally iterates MyGUI widgets and
+// crashes touching our still-alive (but hidden) windows.
+void server_browser_force_close_for_load() {
+    stop_all_pings();
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+
+    // Destroy row widgets (children of s_list_scroll).
+    for (auto it = s_rows.begin(); it != s_rows.end(); ++it) {
+        if (it->second.root && gui) gui->destroyWidget(it->second.root);
+    }
+    s_rows.clear();
+
+    if (s_connecting_window && gui) gui->destroyWidget(s_connecting_window);
+    if (s_add_window && gui)        gui->destroyWidget(s_add_window);
+    if (s_window && gui)            gui->destroyWidget(s_window);
+    if (s_backdrop && gui)          gui->destroyWidget(s_backdrop);
+    s_connecting_window = NULL; s_connecting_label = NULL; s_connecting_cancel = NULL;
+    s_add_window = NULL; s_add_ok = NULL; s_add_cancel = NULL; s_add_err = NULL;
+    s_window = NULL; s_backdrop = NULL; s_list_scroll = NULL;
+    s_btn_refresh = NULL; s_btn_back = NULL; s_btn_direct = NULL;
+    s_btn_add = NULL; s_btn_edit = NULL; s_btn_remove = NULL; s_btn_join = NULL;
+
+    // Restore TitleScreen root + children we hid.
+    for (size_t i = s_ts_hidden_children.size(); i > 0; --i) {
+        MyGUI::Widget* w = s_ts_hidden_children[i - 1].w;
+        if (w && s_ts_hidden_children[i - 1].was_visible) {
+            w->setVisible(true);
+        }
+    }
+    s_ts_hidden_children.clear();
+
+    s_open = false;
+    s_connecting_visible = false;
+}
+
 bool server_browser_is_open() { return s_open; }
 
 void server_browser_tick(float /*dt*/) {

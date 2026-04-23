@@ -38,6 +38,11 @@ public:
 
         std::function<bool(const std::string& location, const std::string& slot)>                 trigger_load;
         std::function<bool()>                                                                     is_load_busy;
+        // Optional: called once on the render thread before trigger_load, so
+        // our menu widgets (browser, connecting modal) are hidden/detached
+        // before SaveManager::loadGame tears down TitleScreen. Without this
+        // the game crashes in kenshi_x64.exe+0x49FAD6 (NULL write).
+        std::function<void()>                                                                     pre_load_cleanup;
 
         std::function<bool(const std::string& host, uint16_t port)>                               connect_enet;
         std::function<bool(const std::string& password)>                                          send_connect_request;
@@ -71,8 +76,10 @@ private:
     std::string m_slot_dir;
 
     float m_enter_download_t;
+    float m_enter_load_trigger_t;
     float m_enter_load_t;
     float m_enter_await_t;
+    bool  m_pre_load_hidden;
 
     uint64_t m_bytes_done;
     uint64_t m_bytes_total;
@@ -82,6 +89,7 @@ private:
     void go_failed(const std::string& msg);
     void tick_download();
     void tick_extract();
+    void tick_load_trigger();
     void tick_load_wait();
     void tick_await_accept();
 };

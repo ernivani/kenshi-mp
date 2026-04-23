@@ -57,6 +57,7 @@ static void hooked_title_update(void* self) {
         KMP_LOG("[KenshiMP] Title screen detected; initialising menu UI...");
         kmp::ui_init();
         kmp::server_browser_init();
+        kmp::joiner_runtime_glue_init();
     }
     kmp::ui_update_main_menu_button();
     // Tick the server browser too — its ping state machine needs frame
@@ -85,8 +86,11 @@ static void hooked_main_loop(GameWorld* world, float time) {
         // no-op when s_ui_initialized is true (see ui.cpp).
         if (!s_title_ui_inited) kmp::ui_init();
         kmp::snapshot_uploader_glue_init();
-        kmp::server_browser_init();
-        kmp::joiner_runtime_glue_init();
+        // server_browser / joiner_runtime may have already been init'd
+        // from the TitleScreen hook — those inits are idempotent (no-op
+        // when already initialized).
+        if (!s_title_ui_inited) kmp::server_browser_init();
+        if (!s_title_ui_inited) kmp::joiner_runtime_glue_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 

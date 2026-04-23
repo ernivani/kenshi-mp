@@ -23,6 +23,7 @@ namespace kmp {
     extern bool client_connect(const char* host, uint16_t port);
     extern void client_disconnect();
     extern void client_send_reliable(const uint8_t* data, size_t length);
+    extern void server_browser_force_close_for_load();
 }
 
 namespace kmp {
@@ -52,9 +53,52 @@ static DWORD WINAPI download_thread_proc(LPVOID param) {
         InterlockedExchange(&job->bytes_total_hi, static_cast<LONG>(total >> 32));
         InterlockedExchange(&job->bytes_total_lo, static_cast<LONG>(total & 0xFFFFFFFF));
     };
+
+    // Retry loop: the host may not have finished uploading its snapshot
+    // when we first ask. On HTTP 503 (no snapshot yet) OR any connect
+    // failure, wait 2 s and try again — up to 60 s total.
+    // The joiner_runtime's 120s download-timeout wraps this.
+    SnapshotDownloadResult rc = SNAPSHOT_DOWNLOAD_UNKNOWN;
     int http = 0;
-    SnapshotDownloadResult rc = download_snapshot_blocking(
-        job->host, job->port, job->out_path, cb, &job->cancel_flag, &http);
+    const int kMaxAttempts = 30;
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+        if (InterlockedCompareExchange(&job->cancel_flag, 0, 0) != 0) {
+            rc = SNAPSHOT_DOWNLOAD_CANCELLED; break;
+        }
+        {
+            char buf[192];
+            _snprintf(buf, sizeof(buf),
+                "[KenshiMP] snapshot_dl: attempt %d/%d host=%s:%u",
+                attempt + 1, kMaxAttempts, job->host.c_str(),
+                static_cast<unsigned>(job->port));
+            KMP_LOG(buf);
+        }
+        rc = download_snapshot_blocking(
+            job->host, job->port, job->out_path, cb, &job->cancel_flag, &http);
+        {
+            char buf[192];
+            _snprintf(buf, sizeof(buf),
+                "[KenshiMP] snapshot_dl: attempt %d result rc=%d http=%d",
+                attempt + 1, static_cast<int>(rc), http);
+            KMP_LOG(buf);
+        }
+        if (rc == SNAPSHOT_DOWNLOAD_OK) break;
+        if (rc == SNAPSHOT_DOWNLOAD_CANCELLED) break;
+        // Retryable errors: 503 (host still uploading) OR connect failures
+        // (server just started / transient network). Everything else = hard fail.
+        bool retry = (rc == SNAPSHOT_DOWNLOAD_HTTP_ERROR && http == 503) ||
+                     (rc == SNAPSHOT_DOWNLOAD_CONNECT_FAILED);
+        if (!retry) break;
+        // Wait 2 s, honoring cancellation.
+        for (int i = 0; i < 20; ++i) {
+            if (InterlockedCompareExchange(&job->cancel_flag, 0, 0) != 0) {
+                rc = SNAPSHOT_DOWNLOAD_CANCELLED;
+                break;
+            }
+            Sleep(100);
+        }
+        if (rc == SNAPSHOT_DOWNLOAD_CANCELLED) break;
+    }
     InterlockedExchange(&job->succeeded, rc == SNAPSHOT_DOWNLOAD_OK ? 1 : 0);
     InterlockedExchange(&job->done, 1);
     return 0;
@@ -195,6 +239,7 @@ void joiner_runtime_glue_init() {
     d.poll_extract       = [](bool& ok) { return poll_extract_bg(ok); };
     d.trigger_load       = [](const std::string& /*loc*/, const std::string& slot) {
                               return load_trigger_start(slot); };
+    d.pre_load_cleanup   = []() { server_browser_force_close_for_load(); };
     d.is_load_busy       = []() { return load_trigger_is_busy(); };
     d.connect_enet       = [](const std::string& h, uint16_t p) {
                               return connect_enet_real(h, p); };

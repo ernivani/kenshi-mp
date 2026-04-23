@@ -22,18 +22,20 @@ bool load_trigger_start(const std::string& slot_name) {
         KMP_LOG("[KenshiMP] load_trigger: SaveManager singleton null");
         return false;
     }
-    // Same location resolution as save_trigger — userSavePath or localSavePath.
-    const std::string& loc = sm->userSavePath.empty() ? sm->localSavePath
-                                                      : sm->userSavePath;
-    int rc = sm->loadGame(loc, slot_name);
+    // Use the public high-level SaveManager::load(name), NOT loadGame(loc,
+    // name). The public one sets signal=LOADGAME + name, and Kenshi's
+    // SaveManager::execute() (called from the game loop) performs the
+    // actual loadGame at a safe point. Calling loadGame directly from our
+    // render-thread tick bypassed execute's harness and crashed in
+    // kenshi_x64.exe+0x49FAD6 (NULL write in a helper).
+    sm->load(slot_name);
     s_load_started_ms = GetTickCount64();
     char msg[256];
     _snprintf(msg, sizeof(msg),
-        "[KenshiMP] load_trigger: loadGame(loc='%s', name='%s') returned %d",
-        loc.c_str(), slot_name.c_str(), rc);
+        "[KenshiMP] load_trigger: SaveManager::load('%s') queued",
+        slot_name.c_str());
     KMP_LOG(msg);
-    // Return non-negative means queued; negative means synchronous refusal.
-    return rc >= 0;
+    return true;
 }
 
 bool load_trigger_is_busy() {
