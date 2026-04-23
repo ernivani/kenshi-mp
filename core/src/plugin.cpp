@@ -57,6 +57,11 @@ static void hooked_title_update(void* self) {
         KMP_LOG("[KenshiMP] Title screen detected; initialising menu UI...");
         kmp::ui_init();
         kmp::server_browser_init();
+        // client_init creates the ENetHost. The joiner runtime's async
+        // connect thread (triggered by Join click before any GameWorld
+        // exists) would otherwise race against a still-NULL s_client and
+        // silently fail. Idempotent — hooked_main_loop skips it later.
+        kmp::client_init();
         kmp::joiner_runtime_glue_init();
     }
     kmp::ui_update_main_menu_button();
@@ -79,7 +84,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
     if (!s_subsystems_initialized) {
         s_subsystems_initialized = true;
         KMP_LOG("[KenshiMP] Initialising subsystems...");
-        kmp::client_init();
+        kmp::client_init();  // idempotent; may have run from TitleScreen hook
         kmp::npc_manager_init();
         kmp::player_sync_init();
         // ui_init may have already run from the TitleScreen hook — it's a

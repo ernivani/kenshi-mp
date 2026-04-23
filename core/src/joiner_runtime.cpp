@@ -34,13 +34,19 @@ static const char* state_name(int s) {
 
 static const float kDownloadTimeoutSec = 120.0f;
 static const float kLoadTimeoutSec     = 120.0f;
-static const float kAcceptTimeoutSec   = 30.0f;
+// Short per-attempt timeout. The first ConnectRequest frequently gets
+// no CONNECT_ACCEPT reply; we retry (disconnect + reconnect + resend)
+// until either accepted or we blow past the total budget.
+static const float kAcceptTimeoutSec   = 3.0f;
+static const float kConnectTotalBudget = 15.0f;
+static const int   kMaxConnectAttempts = 5;
 
 JoinerRuntime::JoinerRuntime(Deps deps)
     : m_deps(deps), m_state(State::Idle),
       m_port(0),
       m_enter_download_t(0.0f), m_enter_load_trigger_t(0.0f),
-      m_enter_load_t(0.0f), m_enter_await_t(0.0f),
+      m_enter_load_t(0.0f), m_load_finished_t(0.0f), m_enter_await_t(0.0f),
+      m_first_connect_t(0.0f), m_connect_attempts(0),
       m_pre_load_hidden(false),
       m_bytes_done(0), m_bytes_total(0) {}
 
@@ -55,6 +61,8 @@ void JoinerRuntime::start(const ServerEntry& entry) {
     m_bytes_done = 0;
     m_bytes_total = 0;
     m_pre_load_hidden = false;
+    m_first_connect_t = 0.0f;
+    m_connect_attempts = 0;
 
     m_state = State::Downloading;
     m_enter_download_t = m_deps.now_seconds();
@@ -66,6 +74,13 @@ void JoinerRuntime::start(const ServerEntry& entry) {
             m_slot.c_str(), m_zip_path.c_str());
         KMP_LOG(buf);
     }
+    // We do NOT start ENet connect here. Tried it both synchronously and
+    // on a background thread — both fail: the peer ends up in some state
+    // where the server's CONNECT_ACCEPT reply is never received. Only
+    // after an explicit disconnect + fresh connect (like the legacy
+    // auto-reconnect path does) does the server respond. So we defer
+    // the connect to the EnetConnect state, which does disconnect+connect
+    // right before sending ConnectRequest.
     // HTTP sidecar listens on ENet port + 1 (see server/core/src/core.cpp).
     m_deps.start_download(m_host, static_cast<uint16_t>(m_port + 1), m_zip_path);
 }
@@ -95,6 +110,15 @@ void JoinerRuntime::tick(float /*dt*/) {
     case State::LoadTrigger:   tick_load_trigger(); break;
     case State::LoadWait:      tick_load_wait();    break;
     case State::EnetConnect: {
+        if (m_first_connect_t == 0.0f) m_first_connect_t = m_deps.now_seconds();
+        ++m_connect_attempts;
+        char buf[160];
+        _snprintf(buf, sizeof(buf),
+            "[KenshiMP] joiner_runtime: EnetConnect host=%s:%u (attempt %d/%d)",
+            m_host.c_str(), static_cast<unsigned>(m_port),
+            m_connect_attempts, kMaxConnectAttempts);
+        KMP_LOG(buf);
+        m_deps.disconnect_enet();
         if (!m_deps.connect_enet(m_host, m_port)) {
             go_failed("Cannot open connection");
             break;
@@ -103,6 +127,7 @@ void JoinerRuntime::tick(float /*dt*/) {
             go_failed("Cannot send ConnectRequest");
             break;
         }
+        KMP_LOG("[KenshiMP] joiner_runtime: sent ConnectRequest, awaiting accept");
         m_state = State::AwaitAccept;
         m_enter_await_t = m_deps.now_seconds();
         break;
@@ -182,14 +207,29 @@ void JoinerRuntime::tick_load_wait() {
         }
         return;
     }
+    KMP_LOG("[KenshiMP] joiner_runtime: LoadWait -> EnetConnect");
     m_state = State::EnetConnect;
 }
 
 void JoinerRuntime::tick_await_accept() {
-    if (m_deps.now_seconds() - m_enter_await_t > kAcceptTimeoutSec) {
+    float now = m_deps.now_seconds();
+    if (now - m_enter_await_t <= kAcceptTimeoutSec) return;
+
+    // Per-attempt timeout expired. Retry (go back to EnetConnect) unless
+    // we've blown the total budget or exhausted the attempt cap.
+    bool over_budget = (now - m_first_connect_t) > kConnectTotalBudget;
+    if (m_connect_attempts >= kMaxConnectAttempts || over_budget) {
         m_deps.disconnect_enet();
         go_failed("Server didn't respond");
+        return;
     }
+    char buf[160];
+    _snprintf(buf, sizeof(buf),
+        "[KenshiMP] joiner_runtime: accept timeout after %.1fs — retrying "
+        "(attempt %d done, elapsed %.1fs)",
+        kAcceptTimeoutSec, m_connect_attempts, now - m_first_connect_t);
+    KMP_LOG(buf);
+    m_state = State::EnetConnect;
 }
 
 void JoinerRuntime::on_connect_accept(uint32_t /*player_id*/) {

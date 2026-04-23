@@ -29,6 +29,7 @@ public:
 #include "serialization.h"
 #include "server_list.h"
 #include "server_pinger.h"
+#include "client_identity.h"
 
 namespace kmp {
 

@@ -13,6 +13,7 @@
 
 #include <kenshi/Character.h>
 #include <kenshi/CharStats.h>
+#include <kenshi/GameWorld.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Enums.h>
 #include <OgreVector3.h>
@@ -47,6 +48,7 @@ extern void client_set_packet_callback(PacketCallback cb);
 
 extern Character* game_get_player_character();
 extern bool game_is_world_loaded();
+extern GameWorld* game_get_world();
 
 extern void npc_manager_on_spawn(const SpawnNPC& pkt);
 extern void npc_manager_on_state(const PlayerState& pkt);
@@ -156,6 +158,8 @@ static bool read_local_player_state(PlayerState& out) {
 // ---------------------------------------------------------------------------
 // Packet dispatch
 // ---------------------------------------------------------------------------
+extern bool joiner_runtime_glue_did_snapshot_join();
+
 static void on_packet_received(const uint8_t* data, size_t length) {
     PacketHeader header;
     if (!peek_header(data, length, header)) return;
@@ -167,9 +171,36 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         if (unpack(data, length, pkt)) {
             client_set_local_id(pkt.player_id);
             host_sync_set_host(s_requested_host);
+            {
+                char lb[128];
+                _snprintf(lb, sizeof(lb),
+                    "[KenshiMP] CONNECT_ACCEPT received player_id=%u "
+                    "s_requested_host=%d snapshot_join=%d",
+                    pkt.player_id, s_requested_host ? 1 : 0,
+                    joiner_runtime_glue_did_snapshot_join() ? 1 : 0);
+                KMP_LOG(lb);
+            }
             if (!s_requested_host) {
-                npc_manager_hide_local_npcs();
-                building_manager_hide_local_buildings();
+                // A.4 snapshot join: the local world was freshly loaded
+                // from the host's save and already matches host state.
+                // Wiping it would destroy exactly what we just loaded —
+                // only wipe in the legacy no-snapshot path.
+                extern bool joiner_runtime_glue_did_snapshot_join();
+                if (!joiner_runtime_glue_did_snapshot_join()) {
+                    npc_manager_hide_local_npcs();
+                    building_manager_hide_local_buildings();
+                } else {
+                    KMP_LOG("[KenshiMP] snapshot join: skipping local wipe "
+                            "(world already matches host)");
+                    // Schedule a deferred destroy of the inherited squad
+                    // — at CONNECT_ACCEPT time the save load is queued
+                    // but PlayerInterface may not have populated the
+                    // player-character list yet. player_sync_tick retries
+                    // until getAllPlayerCharacters() is non-empty, then
+                    // destroys them once.
+                    extern void player_sync_schedule_squad_destroy();
+                    player_sync_schedule_squad_destroy();
+                }
                 // Send combat stats to host
                 Character* local_ch = game_get_player_character();
                 if (local_ch) {
@@ -437,8 +468,50 @@ void player_sync_shutdown() {
 // ---------------------------------------------------------------------------
 // Tick — called every frame on the game thread via AddHook
 // ---------------------------------------------------------------------------
+static bool s_pending_squad_destroy = false;
+static float s_pending_squad_destroy_timeout = 0.0f;
+
+void player_sync_schedule_squad_destroy() {
+    s_pending_squad_destroy = true;
+    s_pending_squad_destroy_timeout = 30.0f; // seconds
+    KMP_LOG("[KenshiMP] snapshot join: squad destroy scheduled");
+}
+
 void player_sync_tick(float dt) {
     if (!s_initialized) return;
+
+    // Deferred inherited-squad cleanup for snapshot join. PlayerInterface
+    // populates playerCharacters a few frames after SaveManager::load
+    // completes — retry until the list has members, then destroy once and
+    // open Kenshi's native character editor on a fresh spawn.
+    if (s_pending_squad_destroy) {
+        extern int game_destroy_inherited_player_squad();
+        int n = game_destroy_inherited_player_squad();
+        if (n > 0) {
+            char buf[96];
+            _snprintf(buf, sizeof(buf),
+                "[KenshiMP] snapshot join: destroyed %d inherited "
+                "player character(s)", n);
+            KMP_LOG(buf);
+            s_pending_squad_destroy = false;
+
+            extern Character* game_spawn_joiner_character_and_edit();
+            Character* joiner_ch = game_spawn_joiner_character_and_edit();
+            if (joiner_ch) {
+                KMP_LOG("[KenshiMP] snapshot join: spawned joiner character");
+            } else {
+                KMP_LOG("[KenshiMP] snapshot join: WARNING failed to spawn "
+                        "joiner character");
+            }
+        } else {
+            s_pending_squad_destroy_timeout -= dt;
+            if (s_pending_squad_destroy_timeout <= 0.0f) {
+                KMP_LOG("[KenshiMP] snapshot join: squad destroy timed out "
+                        "(PlayerInterface never populated)");
+                s_pending_squad_destroy = false;
+            }
+        }
+    }
 
     // Track connection state to detect drops
     static bool s_was_connected = false;
@@ -457,7 +530,14 @@ void player_sync_tick(float dt) {
 
     // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)
 
-    // Poll network if connected
+    // Main thread takes over ENet polling — stop the joiner runtime's
+    // async-connect keepalive loop if still running.
+    extern void joiner_runtime_glue_stop_keepalive();
+    joiner_runtime_glue_stop_keepalive();
+
+    // Poll network if connected. ENet calls in client.cpp are wrapped in
+    // a CRITICAL_SECTION so it's safe even while the joiner_runtime's
+    // async connect thread is running handshakes.
     if (client_is_connected()) {
         client_poll();
         s_was_connected = true;
@@ -504,11 +584,19 @@ void player_sync_tick(float dt) {
         }
     }
 
-    // Only do game sync when connected and world is loaded
-    if (!client_is_connected() || !game_is_world_loaded()) return;
+    // Only do game sync when connected to server.
+    if (!client_is_connected()) return;
 
-    // Update remote NPC positions (interpolation)
-    npc_manager_update(dt);
+    // Update remote NPC positions (interpolation) as soon as a GameWorld
+    // exists — even if the local player has no squad (snapshot-joined
+    // joiner that just destroyed the inherited squad). Without this the
+    // host's remote avatar freezes in place.
+    if (game_get_world()) {
+        npc_manager_update(dt);
+    }
+
+    // Rest of the tick needs the local player to exist.
+    if (!game_is_world_loaded()) return;
 
     // Host: scan and send NPC state to server
     // (disabled — joiner should only see remote player avatars, not host's NPCs)

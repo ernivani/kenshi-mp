@@ -44,9 +44,17 @@ public:
         // the game crashes in kenshi_x64.exe+0x49FAD6 (NULL write).
         std::function<void()>                                                                     pre_load_cleanup;
 
+        // Legacy sync connect (kept for tests). Prefer async pair below.
         std::function<bool(const std::string& host, uint16_t port)>                               connect_enet;
         std::function<bool(const std::string& password)>                                          send_connect_request;
         std::function<void()>                                                                     disconnect_enet;
+        // Async ENet connect. Fired at start() in parallel with download,
+        // so the peer is handshaken by the time the save finishes loading.
+        // start(host, port) kicks off a background thread; poll() returns
+        // 0=pending, 1=connected, -1=failed. Optional — if unset, the
+        // runtime falls back to the sync connect_enet.
+        std::function<void(const std::string& host, uint16_t port)>                               start_async_connect;
+        std::function<int()>                                                                      poll_async_connect;
 
         std::function<float()>                                                                    now_seconds;
         std::function<std::string(const std::string& slot)>                                       resolve_slot_path;
@@ -78,7 +86,10 @@ private:
     float m_enter_download_t;
     float m_enter_load_trigger_t;
     float m_enter_load_t;
+    float m_load_finished_t;   // when SaveFileSystem went idle
     float m_enter_await_t;
+    float m_first_connect_t;   // when we first entered EnetConnect
+    int   m_connect_attempts;  // count of ConnectRequest retries
     bool  m_pre_load_hidden;
 
     uint64_t m_bytes_done;

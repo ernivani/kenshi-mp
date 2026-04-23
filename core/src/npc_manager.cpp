@@ -313,16 +313,28 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
             KMP_LOG("[KenshiMP] WARNING: No faction available for NPC spawn");
             return;
         }
+
+        // Resolve the requested character template (pkt.model is e.g.
+        // "greenlander"). Fall back to NULL (random) if not found.
+        GameData* tmpl = NULL;
+        if (ou && pkt.model[0] != 0) {
+            tmpl = ou->gamedata.getDataByName(std::string(pkt.model), CHARACTER);
+        }
+
         RootObjectBase* obj = factory->createRandomCharacter(
-            faction, spawn_pos, NULL, NULL, NULL, 0.0f
+            faction, spawn_pos, NULL, tmpl, NULL, 0.0f
         );
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
             neutralize_remote_avatar(npc);
+            if (pkt.name[0] != 0) npc->setName(std::string(pkt.name));
             rp.npc = npc;
-            KMP_LOG(
-                "[KenshiMP] Spawned NPC for player " + itos(pkt.player_id));
+            char logbuf[128];
+            _snprintf(logbuf, sizeof(logbuf),
+                "[KenshiMP] Spawned NPC for player %u name='%s' model='%s' tmpl=%s",
+                pkt.player_id, pkt.name, pkt.model, tmpl ? "ok" : "random");
+            KMP_LOG(logbuf);
         } else {
             KMP_LOG(
                 "[KenshiMP] WARNING: Failed to spawn NPC for player " + itos(pkt.player_id));
@@ -350,15 +362,23 @@ void npc_manager_on_state(const PlayerState& pkt) {
             if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
             if (!faction && ou && ou->player) faction = ou->player->getFaction();
             if (faction) {
+                GameData* tmpl = NULL;
+                if (ou && rp.model[0] != 0) {
+                    tmpl = ou->gamedata.getDataByName(std::string(rp.model), CHARACTER);
+                }
                 RootObjectBase* obj = factory->createRandomCharacter(
-                    faction, spawn_pos, NULL, NULL, NULL, 0.0f
+                    faction, spawn_pos, NULL, tmpl, NULL, 0.0f
                 );
                 Character* npc = dynamic_cast<Character*>(obj);
                 if (npc) {
                     neutralize_remote_avatar(npc);
+                    if (rp.name[0] != 0) npc->setName(std::string(rp.name));
                     rp.npc = npc;
-                    KMP_LOG(
-                        "[KenshiMP] Late-spawned NPC for player " + itos(pkt.player_id));
+                    char logbuf[128];
+                    _snprintf(logbuf, sizeof(logbuf),
+                        "[KenshiMP] Late-spawned NPC for player %u name='%s' tmpl=%s",
+                        pkt.player_id, rp.name, tmpl ? "ok" : "random");
+                    KMP_LOG(logbuf);
                 }
             }
         }

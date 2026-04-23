@@ -9,6 +9,10 @@
 #include <kenshi/PlayerInterface.h>
 #include <kenshi/RootObjectFactory.h>
 
+#include <vector>
+
+#include "kmp_log.h"
+
 namespace kmp {
 
 Character* game_get_player_character() {
@@ -36,6 +40,96 @@ bool game_is_world_loaded() {
 
 GameWorld* game_get_world() {
     return ou;
+}
+
+extern bool npc_manager_is_player_npc(Character* ch);
+
+// Spawn a blank character in the local player faction. Used after a
+// snapshot join so the joiner has something to control. Tries a list of
+// common Kenshi character template names; falls back to random if none
+// match. Logs the name of the matched template (or "random") so we can
+// discover what the real names are in this Kenshi install.
+Character* game_spawn_joiner_character_and_edit() {
+    if (!ou) return NULL;
+    if (!ou->theFactory) return NULL;
+    if (!ou->player) return NULL;
+
+    Faction* faction = ou->player->getFaction();
+    if (!faction) return NULL;
+
+    // Dump up to 40 CHARACTER templates available, first time this runs,
+    // so we can identify valid starter names from the log.
+    static bool s_dumped = false;
+    if (!s_dumped) {
+        s_dumped = true;
+        lektor<GameData*> list;
+        ou->gamedata.getDataOfType(list, CHARACTER);
+        char hdr[96];
+        _snprintf(hdr, sizeof(hdr),
+            "[KenshiMP] CHARACTER GameData count=%d (dumping first 40):",
+            list.count);
+        KMP_LOG(hdr);
+        int lim = list.count < 40 ? list.count : 40;
+        for (int i = 0; i < lim; ++i) {
+            if (list.stuff[i]) {
+                GameData* d = list.stuff[i];
+                KMP_LOG(std::string("[KenshiMP]   CHARACTER: ") + d->name);
+            }
+        }
+    }
+
+    GameData* tmpl = NULL;
+    const char* candidates[] = {
+        "Wanderer",          // starter preset — verified present in this install
+        "UC start",
+        "Greenlander", "greenlander",
+        NULL
+    };
+    const char* matched = NULL;
+    for (int i = 0; candidates[i]; ++i) {
+        tmpl = ou->gamedata.getDataByName(std::string(candidates[i]), CHARACTER);
+        if (tmpl) { matched = candidates[i]; break; }
+    }
+    KMP_LOG(std::string("[KenshiMP] joiner char template = ") +
+        (matched ? matched : "(none — fallback random)"));
+
+    Ogre::Vector3 pos = ou->getCameraCenter();
+    RootObjectBase* obj = ou->theFactory->createRandomCharacter(
+        faction, pos, NULL, tmpl, NULL, 0.0f);
+    Character* ch = dynamic_cast<Character*>(obj);
+    // Do NOT open Kenshi's native character editor here:
+    // activateCharacterEditMode crashes at kenshi_x64.exe+0x7F678B because
+    // the editor's internal `races` list is NULL outside a new-game flow.
+    // Even with a proper Wanderer template the crash persists.
+    // TODO: spawn + edit via ForgottenGUI::showCharacterEditor with an
+    //       explicit races list (see CharacterEditWindow.h).
+    return ch;
+}
+
+// Destroy every character in the local PlayerInterface's squad. Used after
+// a snapshot join so the joiner doesn't inherit the host's squad. Skips
+// characters that are registered as remote players — those are spawned
+// by the server's SpawnNPC path into the player faction (fallback when
+// getEmptyFaction returns null) and must NOT be destroyed here.
+// Returns the number of characters actually destroyed.
+int game_destroy_inherited_player_squad() {
+    if (!ou) return 0;
+    if (!ou->player) return 0;
+
+    const lektor<Character*>& chars = ou->player->getAllPlayerCharacters();
+    std::vector<Character*> copy;
+    copy.reserve(chars.count);
+    for (int i = 0; i < chars.count; ++i) {
+        if (chars.stuff[i]) copy.push_back(chars.stuff[i]);
+    }
+    int n = 0;
+    for (size_t i = 0; i < copy.size(); ++i) {
+        if (npc_manager_is_player_npc(copy[i])) continue;
+        if (ou->destroy(copy[i], false, "kmp: clear inherited squad")) {
+            ++n;
+        }
+    }
+    return n;
 }
 
 } // namespace kmp

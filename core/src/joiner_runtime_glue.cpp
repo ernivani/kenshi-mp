@@ -23,6 +23,7 @@ namespace kmp {
     extern bool client_connect(const char* host, uint16_t port);
     extern void client_disconnect();
     extern void client_send_reliable(const uint8_t* data, size_t length);
+    extern void client_poll();
     extern void server_browser_force_close_for_load();
 }
 
@@ -125,6 +126,75 @@ static DWORD WINAPI extract_thread_proc(LPVOID param) {
 static std::unique_ptr<JoinerRuntime> s_runtime;
 static std::unique_ptr<DownloadJob>   s_dl_job;
 static std::unique_ptr<ExtractJob>    s_ex_job;
+static bool                           s_did_snapshot_join = false;
+
+// Async ENet connect. Runs client_connect (which blocks up to 5 s on the
+// ENet handshake) on a dedicated thread so it can overlap with the HTTP
+// snapshot download. While this thread is live we mustn't let the main
+// thread call client_poll/client_send_* against the same ENetHost — the
+// enet_host_service call inside client_connect isn't thread-safe. The
+// `s_enet_connect_busy` flag gates main-thread ENet access (see
+// joiner_runtime_glue_enet_connect_busy()); player_sync_tick skips
+// client_poll while it is set.
+struct ConnectJob {
+    HANDLE        thread;
+    std::string   host;
+    uint16_t      port;
+    volatile LONG done;      // 1 when client_connect returned
+    volatile LONG success;   // 1 = connected, 0 = failed
+    volatile LONG stop;      // set by main thread to stop the keepalive loop
+
+    ConnectJob() : thread(NULL), port(0), done(0), success(0), stop(0) {}
+};
+static std::unique_ptr<ConnectJob>   s_co_job;
+static volatile LONG                  s_enet_connect_busy = 0;
+
+static DWORD WINAPI connect_thread_proc(LPVOID param) {
+    ConnectJob* job = reinterpret_cast<ConnectJob*>(param);
+    // Defensive: clear any stale peer before connecting. Mirrors the
+    // successful auto-reconnect path (which always runs after a disconnect).
+    client_disconnect();
+    bool ok = client_connect(job->host.c_str(), job->port);
+    InterlockedExchange(&job->success, ok ? 1 : 0);
+    InterlockedExchange(&job->done, 1);
+    InterlockedExchange(&s_enet_connect_busy, 0);
+
+    // Keep the peer alive until the main thread takes over. Between
+    // "connect succeeded" and "player_sync_tick starts polling" there's
+    // a multi-second gap where SaveManager::load blocks the main thread.
+    // Without client_poll being called during that window ENet keepalives
+    // aren't sent/received and the server times the peer out. Run poll
+    // here on a 50 ms tick until told to stop.
+    while (ok && InterlockedCompareExchange(&job->stop, 0, 0) == 0) {
+        client_poll();
+        Sleep(50);
+    }
+    return 0;
+}
+
+static void start_async_connect_bg(const std::string& host, uint16_t port) {
+    if (s_co_job && s_co_job->thread) {
+        WaitForSingleObject(s_co_job->thread, INFINITE);
+        CloseHandle(s_co_job->thread);
+    }
+    s_co_job.reset(new ConnectJob());
+    s_co_job->host = host;
+    s_co_job->port = port;
+    InterlockedExchange(&s_enet_connect_busy, 1);
+    s_co_job->thread = CreateThread(NULL, 0, connect_thread_proc,
+                                    s_co_job.get(), 0, NULL);
+    if (!s_co_job->thread) {
+        InterlockedExchange(&s_enet_connect_busy, 0);
+        InterlockedExchange(&s_co_job->done, 1);
+        InterlockedExchange(&s_co_job->success, 0);
+    }
+}
+
+static int poll_async_connect_bg() {
+    if (!s_co_job) return -1;
+    if (InterlockedCompareExchange(&s_co_job->done, 0, 0) == 0) return 0;
+    return InterlockedCompareExchange(&s_co_job->success, 0, 0) != 0 ? 1 : -1;
+}
 
 static float clock_seconds() {
     static LARGE_INTEGER freq, t0;
@@ -200,17 +270,29 @@ static bool poll_extract_bg(bool& ok) {
 }
 
 static bool connect_enet_real(const std::string& host, uint16_t port) {
+    // Reset the ENet peer before the first connect. Without this the
+    // first ConnectRequest silently gets no reply (server sees stale
+    // handshake state?) — only after an explicit disconnect + reconnect
+    // (via player_sync auto-reconnect 3s after our timeout) does the
+    // server respond. Mimic that reset here so we skip the wasted wait.
+    client_disconnect();
     return client_connect(host.c_str(), port);
 }
 
 static bool send_connect_request_real(const std::string& password) {
+    // IMPORTANT: don't memset(&req, 0, sizeof(req)) here — the struct's
+    // default constructor zero-fills AND sets header.version + type.
+    // A post-ctor memset wipes those out, producing a packet of type=0
+    // that the server silently drops (spent hours chasing this). Just
+    // rely on the ctor and set the fields we need.
     ConnectRequest req;
-    std::strncpy(req.name,  "Player",      MAX_NAME_LENGTH - 1);
-    std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
+    std::strncpy(req.name,  client_identity_get_name().c_str(),
+                 MAX_NAME_LENGTH - 1);
+    std::strncpy(req.model, client_identity_get_model().c_str(),
+                 MAX_MODEL_LENGTH - 1);
     req.is_host = 0;
     const char* uuid = client_identity_get_uuid();
-    std::strncpy(req.client_uuid, uuid ? uuid : "",
-                 sizeof(req.client_uuid) - 1);
+    if (uuid) std::strncpy(req.client_uuid, uuid, sizeof(req.client_uuid) - 1);
     std::strncpy(req.password, password.c_str(), MAX_PASSWORD_LENGTH - 1);
 
     std::vector<uint8_t> buf = pack(req);
@@ -246,6 +328,9 @@ void joiner_runtime_glue_init() {
     d.send_connect_request = [](const std::string& pw) {
                                 return send_connect_request_real(pw); };
     d.disconnect_enet    = []() { disconnect_enet_safe(); };
+    d.start_async_connect = [](const std::string& h, uint16_t p) {
+                                start_async_connect_bg(h, p); };
+    d.poll_async_connect  = []() { return poll_async_connect_bg(); };
     d.now_seconds        = []() { return clock_seconds(); };
     d.resolve_slot_path  = [](const std::string& slot) {
                               return load_trigger_resolve_slot_path(slot); };
@@ -271,7 +356,21 @@ void joiner_runtime_glue_shutdown() {
 
 void joiner_runtime_glue_start(const ServerEntry& entry) {
     if (!s_runtime) return;
+    s_did_snapshot_join = true;
     s_runtime->start(entry);
+}
+
+bool joiner_runtime_glue_did_snapshot_join() { return s_did_snapshot_join; }
+
+bool joiner_runtime_glue_enet_connect_busy() {
+    return InterlockedCompareExchange(&s_enet_connect_busy, 0, 0) != 0;
+}
+
+// Stop the async-connect keepalive loop. Called by player_sync_tick once
+// main-thread polling takes over. Idempotent.
+void joiner_runtime_glue_stop_keepalive() {
+    if (!s_co_job) return;
+    InterlockedExchange(&s_co_job->stop, 1);
 }
 
 void joiner_runtime_glue_cancel() {
