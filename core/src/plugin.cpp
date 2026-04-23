@@ -96,6 +96,11 @@ static void hooked_main_loop(GameWorld* world, float time) {
 
     // Run multiplayer sync on the game thread
     kmp::player_sync_tick(time);
+
+    // Keep joiner_runtime ticking after load completes — once the game
+    // world exists, TitleScreen::update stops firing, so its LoadWait →
+    // EnetConnect → AwaitAccept steps would stall without this.
+    kmp::joiner_runtime_glue_tick(time);
 }
 
 // ---------------------------------------------------------------------------
