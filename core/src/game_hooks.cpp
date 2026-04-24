@@ -88,6 +88,34 @@ std::vector<uint8_t> game_serialize_player_state() {
     return out;
 }
 
+// Apply a serialized appearance blob to a Character. Calls
+// Character::setAppearanceData(GameDataCopyStandalone*) — SAFETY: only
+// safe when called IMMEDIATELY after spawn (same tick as
+// createRandomCharacter), before any render pass / physics tick has
+// run on the character. Calling on a live character has been observed
+// to crash Kenshi a few seconds later (render/skeleton refresh race).
+bool game_apply_character_appearance_at_spawn(Character* ch,
+                                              const uint8_t* blob,
+                                              size_t len) {
+    if (!ch || !blob || len == 0) return false;
+    // Write blob to a temp file for Kenshi's file-based GameData load.
+    std::string path = temp_char_path() + ".app";
+    FILE* f = NULL;
+    if (fopen_s(&f, path.c_str(), "wb") != 0 || !f) return false;
+    size_t put = fwrite(blob, 1, len, f);
+    fclose(f);
+    if (put != len) { DeleteFileA(path.c_str()); return false; }
+
+    GameDataCopyStandalone* gd = new GameDataCopyStandalone();
+    bool loaded = gd->loadFromFile(path, CHARACTER_APPEARANCE);
+    DeleteFileA(path.c_str());
+    if (!loaded) return false;
+    // Hand gd ownership to the Character (matches the signature: Kenshi
+    // stores the pointer; freeing it here would dangle).
+    ch->setAppearanceData(gd);
+    return true;
+}
+
 // Serialize just one Character's appearance blob (race, face, hair,
 // body, gear) via Kenshi's per-char API. Returns empty vector on
 // failure. Safe to call on a live local character.

@@ -167,6 +167,57 @@ void npc_manager_buffer_appearance(uint32_t player_id,
                                    const uint8_t* blob, size_t len) {
     if (!blob || len == 0) return;
     s_pending_appearance[player_id].assign(blob, blob + len);
+
+    // If a remote NPC already exists for this player_id, it was spawned
+    // with random appearance (blob arrived too late). Destroy + respawn
+    // so the correct skin shows up. Preserves name + last known
+    // position so the swap is visually seamless.
+    std::map<uint32_t, RemotePlayer>::iterator it =
+        s_remote_players.find(player_id);
+    if (it == s_remote_players.end() || !it->second.npc) return;
+
+    RemotePlayer& rp = it->second;
+    Character* old_npc = rp.npc;
+    Ogre::Vector3 pos = old_npc->getPosition();
+
+    GameWorld* world = game_get_world();
+    if (!world) return;
+    RootObjectFactory* factory = game_get_factory();
+    if (!factory) return;
+
+    // Destroy the old random-appearance NPC.
+    world->destroy(old_npc, false, "kmp: respawn with appearance");
+    rp.npc = NULL;
+
+    // Spawn new with appearance applied at spawn (same-tick safe path).
+    Faction* faction = NULL;
+    if (ou && ou->factionMgr) faction = ou->factionMgr->getEmptyFaction();
+    if (!faction && ou && ou->player) faction = ou->player->getFaction();
+    if (!faction) return;
+
+    GameData* tmpl = NULL;
+    if (ou && rp.model[0] != 0) {
+        tmpl = ou->gamedata.getDataByName(std::string(rp.model), CHARACTER);
+    }
+    RootObjectBase* obj = factory->createRandomCharacter(
+        faction, pos, NULL, tmpl, NULL, 0.0f);
+    Character* npc = dynamic_cast<Character*>(obj);
+    if (!npc) return;
+
+    extern bool game_apply_character_appearance_at_spawn(
+        Character*, const uint8_t*, size_t);
+    bool appearance_applied = game_apply_character_appearance_at_spawn(
+        npc, blob, len);
+    neutralize_remote_avatar(npc);
+    if (rp.name[0] != 0) npc->setName(std::string(rp.name));
+    rp.npc = npc;
+
+    char logbuf[192];
+    _snprintf(logbuf, sizeof(logbuf),
+        "[KenshiMP] RESPAWNED NPC for player %u with new appearance "
+        "(applied=%d, size=%zu)", player_id,
+        appearance_applied ? 1 : 0, len);
+    KMP_LOG(logbuf);
 }
 
 const std::vector<uint8_t>* npc_manager_get_pending_appearance(uint32_t player_id) {
@@ -345,13 +396,29 @@ void npc_manager_on_spawn(const SpawnNPC& pkt) {
 
         Character* npc = dynamic_cast<Character*>(obj);
         if (npc) {
+            // Apply the buffered appearance blob (if any) BEFORE
+            // neutralise/setName so the character is swapped to the
+            // sender's look on the same tick as spawn — before any
+            // render/physics update. Applying later crashes Kenshi.
+            const std::vector<uint8_t>* app =
+                npc_manager_get_pending_appearance(pkt.player_id);
+            bool appearance_applied = false;
+            if (app) {
+                extern bool game_apply_character_appearance_at_spawn(
+                    Character*, const uint8_t*, size_t);
+                appearance_applied = game_apply_character_appearance_at_spawn(
+                    npc, app->data(), app->size());
+            }
             neutralize_remote_avatar(npc);
             if (pkt.name[0] != 0) npc->setName(std::string(pkt.name));
             rp.npc = npc;
-            char logbuf[128];
+            char logbuf[192];
             _snprintf(logbuf, sizeof(logbuf),
-                "[KenshiMP] Spawned NPC for player %u name='%s' model='%s' tmpl=%s",
-                pkt.player_id, pkt.name, pkt.model, tmpl ? "ok" : "random");
+                "[KenshiMP] Spawned NPC for player %u name='%s' model='%s' "
+                "tmpl=%s appearance=%s",
+                pkt.player_id, pkt.name, pkt.model, tmpl ? "ok" : "random",
+                appearance_applied ? "applied" :
+                    (app ? "blob_present_but_apply_failed" : "no_blob"));
             KMP_LOG(logbuf);
         } else {
             KMP_LOG(
@@ -389,13 +456,25 @@ void npc_manager_on_state(const PlayerState& pkt) {
                 );
                 Character* npc = dynamic_cast<Character*>(obj);
                 if (npc) {
+                    const std::vector<uint8_t>* app =
+                        npc_manager_get_pending_appearance(pkt.player_id);
+                    bool appearance_applied = false;
+                    if (app) {
+                        extern bool game_apply_character_appearance_at_spawn(
+                            Character*, const uint8_t*, size_t);
+                        appearance_applied = game_apply_character_appearance_at_spawn(
+                            npc, app->data(), app->size());
+                    }
                     neutralize_remote_avatar(npc);
                     if (rp.name[0] != 0) npc->setName(std::string(rp.name));
                     rp.npc = npc;
-                    char logbuf[128];
+                    char logbuf[192];
                     _snprintf(logbuf, sizeof(logbuf),
-                        "[KenshiMP] Late-spawned NPC for player %u name='%s' tmpl=%s",
-                        pkt.player_id, rp.name, tmpl ? "ok" : "random");
+                        "[KenshiMP] Late-spawned NPC for player %u name='%s' "
+                        "tmpl=%s appearance=%s",
+                        pkt.player_id, rp.name, tmpl ? "ok" : "random",
+                        appearance_applied ? "applied" :
+                            (app ? "blob_present_but_apply_failed" : "no_blob"));
                     KMP_LOG(logbuf);
                 }
             }
