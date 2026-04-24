@@ -162,12 +162,14 @@ Character* game_spawn_joiner_character_and_edit() {
     RootObjectBase* obj = ou->theFactory->createRandomCharacter(
         faction, pos, NULL, tmpl, NULL, 0.0f);
     Character* ch = dynamic_cast<Character*>(obj);
-    // Do NOT open Kenshi's native character editor here:
-    // activateCharacterEditMode crashes at kenshi_x64.exe+0x7F678B because
-    // the editor's internal `races` list is NULL outside a new-game flow.
-    // Even with a proper Wanderer template the crash persists.
-    // TODO: spawn + edit via ForgottenGUI::showCharacterEditor with an
-    //       explicit races list (see CharacterEditWindow.h).
+    // Investigation: re-enable auto-open while disabling CHARACTER_UPLOAD
+    // periodic send (see player_sync.cpp). Hypothesis B: serialising
+    // PlayerInterface mid-game corrupts Character state, cascading into
+    // host crash on subsequent PlayerState receive.
+    if (ch) {
+        extern void char_editor_open_deferred(Character* ch);
+        char_editor_open_deferred(ch);
+    }
     return ch;
 }
 

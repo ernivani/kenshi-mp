@@ -32,6 +32,8 @@ namespace kmp {
     void joiner_runtime_glue_init();
     void joiner_runtime_glue_shutdown();
     void joiner_runtime_glue_tick(float dt);
+    void char_editor_install_hook();
+    void char_editor_tick();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +108,7 @@ static void hooked_main_loop(GameWorld* world, float time) {
     // world exists, TitleScreen::update stops firing, so its LoadWait →
     // EnetConnect → AwaitAccept steps would stall without this.
     kmp::joiner_runtime_glue_tick(time);
+    kmp::char_editor_tick();
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +167,11 @@ __declspec(dllexport) void startPlugin() {
     } else {
         KMP_LOG("[KenshiMP] Warning: TitleScreen::update symbol not found");
     }
+
+    // Install ForgottenGUI::update hook so we can capture the FGUI
+    // singleton pointer and call showCharacterEditor directly later
+    // (PlayerInterface::activateCharacterEditMode crashes mid-game).
+    kmp::char_editor_install_hook();
 
     KMP_LOG("[KenshiMP] Plugin loaded OK (game loop hooked)");
 }

@@ -616,6 +616,21 @@ void player_sync_tick(float dt) {
     // Only do game sync when connected to server.
     if (!client_is_connected()) return;
 
+    // DIAGNOSTIC: while our native character editor is open on the
+    // joiner, the Character is in an internal editor state (scene
+    // swap, physics disabled, etc). Sending PlayerState / combat
+    // packets with this state was suspected to corrupt the host's
+    // view. Gate ALL sends while editor is open to test.
+    extern bool char_editor_is_open();
+    if (char_editor_is_open()) {
+        static bool s_logged_once = false;
+        if (!s_logged_once) {
+            KMP_LOG("[KenshiMP] player_sync: gated — editor open, skipping sends");
+            s_logged_once = true;
+        }
+        return;
+    }
+
     // Update remote NPC positions (interpolation) as soon as a GameWorld
     // exists — even if the local player has no squad (snapshot-joined
     // joiner that just destroyed the inherited squad). Without this the
@@ -631,7 +646,14 @@ void player_sync_tick(float dt) {
     // it can send it back on our next reconnect (character persistence).
     // First upload ~8 s after connect to let initial spawn settle; then
     // every 30 s.
-    if (!s_requested_host &&
+    //
+    // DIAGNOSTIC: temporarily DISABLED to test hypothesis B — whether
+    // PlayerInterface::serialise() is what corrupts Character state and
+    // crashes the host on subsequent PlayerState receive. If host stops
+    // crashing with this off, the culprit is the serialisation path.
+    static const bool kDiagDisableUpload = true;
+    if (!kDiagDisableUpload &&
+        !s_requested_host &&
         joiner_runtime_glue_did_snapshot_join()) {
         static float s_upload_timer = 22.0f;  // -> first fire at +8 s
         s_upload_timer += dt;
