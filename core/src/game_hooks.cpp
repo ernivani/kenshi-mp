@@ -88,6 +88,34 @@ std::vector<uint8_t> game_serialize_player_state() {
     return out;
 }
 
+// Serialize just one Character's appearance blob (race, face, hair,
+// body, gear) via Kenshi's per-char API. Returns empty vector on
+// failure. Safe to call on a live local character.
+std::vector<uint8_t> game_serialize_character_appearance(Character* ch) {
+    std::vector<uint8_t> out;
+    if (!ch) return out;
+    GameDataCopyStandalone* gd = ch->getAppearanceData();
+    if (!gd) return out;
+
+    std::string path = temp_char_path() + ".app";
+    if (!gd->saveToFile(path)) return out;
+
+    FILE* f = NULL;
+    if (fopen_s(&f, path.c_str(), "rb") == 0 && f) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 0) {
+            out.resize(static_cast<size_t>(sz));
+            size_t got = fread(out.data(), 1, out.size(), f);
+            if (got != out.size()) out.clear();
+        }
+        fclose(f);
+    }
+    DeleteFileA(path.c_str());
+    return out;
+}
+
 // Inverse: write the blob to a temp file, call GameData::loadFromFile
 // + PlayerInterface::loadFromSerialise. Returns true on success.
 bool game_apply_player_state(const uint8_t* blob, size_t len) {

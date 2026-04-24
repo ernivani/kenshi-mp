@@ -157,6 +157,24 @@ struct RemotePlayer {
 };
 
 static std::map<uint32_t, RemotePlayer> s_remote_players;
+// Appearance blobs buffered per player_id. Populated by
+// npc_manager_buffer_appearance() when we receive CHARACTER_APPEARANCE
+// before the matching SpawnNPC. Consumed at spawn time (Phase 2 will
+// use it for giveBirth; Phase 1 just logs).
+static std::map<uint32_t, std::vector<uint8_t> > s_pending_appearance;
+
+void npc_manager_buffer_appearance(uint32_t player_id,
+                                   const uint8_t* blob, size_t len) {
+    if (!blob || len == 0) return;
+    s_pending_appearance[player_id].assign(blob, blob + len);
+}
+
+const std::vector<uint8_t>* npc_manager_get_pending_appearance(uint32_t player_id) {
+    std::map<uint32_t, std::vector<uint8_t> >::iterator it =
+        s_pending_appearance.find(player_id);
+    if (it == s_pending_appearance.end() || it->second.empty()) return NULL;
+    return &it->second;
+}
 
 // ---------------------------------------------------------------------------
 // Remote NPC sync (from host via server)

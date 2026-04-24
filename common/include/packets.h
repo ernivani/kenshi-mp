@@ -59,6 +59,13 @@ namespace PacketType {
     // spawning a fresh Wanderer.
     static const uint8_t CHARACTER_UPLOAD    = 0xC0;
     static const uint8_t CHARACTER_RESTORE   = 0xC1;
+    // Per-character appearance blob (Kenshi GameDataCopyStandalone bytes
+    // from Character::getAppearanceData() → saveToFile). Clients send on
+    // local spawn + after editor close; server relays to all peers AND
+    // caches. New joiners receive cached blobs before any SpawnNPC so
+    // the blob is ready at spawn time (enables giveBirth-style spawn
+    // instead of random).
+    static const uint8_t CHARACTER_APPEARANCE = 0xC2;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +483,22 @@ struct CharacterRestore {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::CHARACTER_RESTORE;
+    }
+};
+
+// Per-character appearance blob (authoritative player_id = server's
+// session id). Sent by clients, relayed+cached by the server, received
+// by all other peers to drive correct remote-NPC skin. Wire:
+// {CharacterAppearance}{<blob_size> bytes}.
+struct CharacterAppearance {
+    PacketHeader header;
+    uint32_t     player_id;
+    uint32_t     blob_size;
+
+    CharacterAppearance() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_APPEARANCE;
     }
 };
 

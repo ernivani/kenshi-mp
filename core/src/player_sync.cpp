@@ -438,6 +438,24 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::CHARACTER_APPEARANCE: {
+        CharacterAppearance pkt;
+        const uint8_t* tail = NULL;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, pkt, tail, tail_len)) break;
+        if (tail_len < pkt.blob_size) break;
+        if (pkt.player_id == client_get_local_id()) break;  // our own
+        extern void npc_manager_buffer_appearance(
+            uint32_t player_id, const uint8_t* blob, size_t len);
+        npc_manager_buffer_appearance(pkt.player_id, tail, pkt.blob_size);
+        char lb[128];
+        _snprintf(lb, sizeof(lb),
+            "[KenshiMP] CHARACTER_APPEARANCE p=%u buffered (%u bytes)",
+            pkt.player_id, pkt.blob_size);
+        KMP_LOG(lb);
+        break;
+    }
+
     case PacketType::CHARACTER_RESTORE: {
         CharacterRestore pkt;
         const uint8_t* tail = NULL;
@@ -641,6 +659,45 @@ void player_sync_tick(float dt) {
 
     // Rest of the tick needs the local player to exist.
     if (!game_is_world_loaded()) return;
+
+    // Appearance broadcast (Phase 1 infrastructure). Send one packet per
+    // relevant event: first time local char exists post-connect, and on
+    // the falling edge of the editor (user confirmed new look). Server
+    // caches + relays; receivers buffer for use at spawn time.
+    {
+        static bool s_appearance_sent_once = false;
+        static bool s_editor_was_open      = false;
+        bool editor_open_now = char_editor_is_open();
+        bool editor_closed_edge = s_editor_was_open && !editor_open_now;
+        s_editor_was_open = editor_open_now;
+
+        bool should_send = (!s_appearance_sent_once) || editor_closed_edge;
+        if (should_send) {
+            Character* local_ch = game_get_player_character();
+            if (local_ch) {
+                extern std::vector<uint8_t>
+                    game_serialize_character_appearance(Character*);
+                std::vector<uint8_t> blob =
+                    game_serialize_character_appearance(local_ch);
+                if (!blob.empty()) {
+                    CharacterAppearance hdr;
+                    hdr.player_id = client_get_local_id();
+                    hdr.blob_size = static_cast<uint32_t>(blob.size());
+                    std::vector<uint8_t> packed = pack_with_tail(
+                        hdr, blob.data(), blob.size());
+                    client_send_reliable(packed.data(), packed.size());
+                    s_appearance_sent_once = true;
+                    char lb[128];
+                    _snprintf(lb, sizeof(lb),
+                        "[KenshiMP] CHARACTER_APPEARANCE sent %u bytes "
+                        "(first=%d, editor_closed_edge=%d)",
+                        hdr.blob_size, s_appearance_sent_once ? 1 : 0,
+                        editor_closed_edge ? 1 : 0);
+                    KMP_LOG(lb);
+                }
+            }
+        }
+    }
 
     // Joiners: periodically upload our serialized squad to the server so
     // it can send it back on our next reconnect (character persistence).
