@@ -104,3 +104,26 @@ if(ENET_DIR)
         ${ENET_DIR}/lib ${ENET_DIR}/build/Release ${ENET_DIR}/build/Debug)
     target_link_libraries(test-server-info-e2e PRIVATE enet)
 endif()
+
+add_executable(test-connect-request-password test_connect_request_password.cpp)
+target_link_libraries(test-connect-request-password PRIVATE kenshi-mp-common)
+target_compile_features(test-connect-request-password PRIVATE cxx_std_17)
+
+set_source_files_properties(${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c PROPERTIES LANGUAGE C)
+add_executable(test-snapshot-extract test_snapshot_extract.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_extract.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/snapshot_zip.cpp
+    ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c)
+target_include_directories(test-snapshot-extract PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/deps/miniz)
+target_link_libraries(test-snapshot-extract PRIVATE kenshi-mp-common)
+target_compile_features(test-snapshot-extract PRIVATE cxx_std_17)
+
+add_executable(test-joiner-runtime test_joiner_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/joiner_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/core/src/server_list.cpp)
+target_include_directories(test-joiner-runtime PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(test-joiner-runtime PRIVATE kenshi-mp-common)
+target_compile_features(test-joiner-runtime PRIVATE cxx_std_17)

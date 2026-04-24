@@ -24,6 +24,7 @@ static const uint8_t  PROTOCOL_VERSION   = 1;
 
 static const size_t   MAX_NAME_LENGTH    = 32;
 static const size_t   MAX_MODEL_LENGTH   = 64;
+static const size_t   MAX_PASSWORD_LENGTH = 64;
 static const size_t   MAX_CHAT_LENGTH    = 256;
 
 static const float    NPC_SYNC_RADIUS     = 500.0f;

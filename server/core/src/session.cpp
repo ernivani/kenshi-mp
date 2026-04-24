@@ -24,6 +24,7 @@
 #include "spawn.h"
 #include "snapshot.h"
 #include "snapshot_upload.h"
+#include "character_store.h"
 
 namespace kmp {
 
@@ -50,11 +51,16 @@ struct PlayerSession {
     uint32_t    last_animation_id;
     uint8_t     last_posture_flags;
     std::chrono::steady_clock::time_point last_activity;
+    std::string client_uuid;  // for per-player character persistence
 };
 
 static std::map<uint32_t, PlayerSession>   s_sessions;        // id -> session
 static std::map<ENetPeer*, uint32_t>       s_peer_to_id;      // peer -> id
 static std::map<std::string, uint32_t>     s_uuid_to_id;      // stable identity
+// Per-player appearance blob cache. Fed by CHARACTER_APPEARANCE packets
+// from live peers; replayed to new joiners BEFORE their SpawnNPC so the
+// blob is available when the remote NPC is constructed.
+static std::map<uint32_t, std::vector<uint8_t>> s_appearance_cache;
 static uint32_t s_next_id = 1;
 static uint32_t s_host_id = 0;  // player ID of the host (0 = no host)
 
@@ -157,6 +163,7 @@ void session_on_disconnect(ENetPeer* peer) {
     world_state_remove_player(id);
     s_sessions.erase(id);
     s_peer_to_id.erase(it);
+    s_appearance_cache.erase(id);
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +181,21 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
         relay_send_to(peer, buf.data(), buf.size(), true);
         enet_peer_disconnect_later(peer, 0);
         return;
+    }
+
+    // Password gate. If the server has a password configured and the
+    // client's password doesn't match, reject.
+    if (s_server_config && !s_server_config->password.empty()) {
+        if (std::strcmp(req.password, s_server_config->password.c_str()) != 0) {
+            ConnectReject reject;
+            safe_strcpy(reject.reason, "wrong password");
+            auto buf = pack(reject);
+            relay_send_to(peer, buf.data(), buf.size(), true);
+            enet_peer_disconnect_later(peer, 0);
+            spdlog::info("CONNECT rejected: wrong password from {}",
+                         peer->address.host);
+            return;
+        }
     }
 
     // Resolve stable player id from client_uuid. If the UUID is known, reuse
@@ -213,6 +235,7 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     session.last_posture_flags = 0;
     session.last_activity = std::chrono::steady_clock::now();
     session.is_host = (req.is_host != 0);
+    session.client_uuid = uuid;
     if (session.is_host && s_host_id == 0) {
         s_host_id = id;
         spdlog::info("Player {} is the HOST", id);
@@ -229,6 +252,37 @@ static void handle_connect_request(ENetPeer* peer, const uint8_t* data, size_t l
     accept.player_id = id;
     auto buf_accept = pack(accept);
     relay_send_to(peer, buf_accept.data(), buf_accept.size(), true);
+
+    // If we have a persisted character for this UUID, send it so the
+    // joiner can restore their squad instead of spawning a fresh one.
+    // Hosts don't need this (they load from their own save).
+    if (!session.is_host && !uuid.empty()) {
+        std::vector<uint8_t> blob;
+        if (character_store_get(uuid, blob) && !blob.empty()) {
+            CharacterRestore hdr;
+            hdr.blob_size = static_cast<uint32_t>(blob.size());
+            auto buf = pack_with_tail(hdr, blob.data(), blob.size());
+            relay_send_to(peer, buf.data(), buf.size(), true);
+            spdlog::info("CHARACTER_RESTORE sent to player {} ({} bytes)",
+                         id, blob.size());
+        }
+    }
+
+    // Send cached appearance blobs for all existing players BEFORE we
+    // emit SpawnNPC for them — so the joiner's receive path can apply
+    // the blob at spawn time (no mid-life setAppearanceData).
+    for (auto& ap : s_appearance_cache) {
+        uint32_t pid = ap.first;
+        if (pid == id) continue;
+        if (ap.second.empty()) continue;
+        CharacterAppearance hdr;
+        hdr.player_id = pid;
+        hdr.blob_size = static_cast<uint32_t>(ap.second.size());
+        auto buf = pack_with_tail(hdr, ap.second.data(), ap.second.size());
+        relay_send_to(peer, buf.data(), buf.size(), true);
+        spdlog::info("CHARACTER_APPEARANCE replayed to player {} "
+                     "(for pid={}, {} bytes)", id, pid, ap.second.size());
+    }
 
     // Tell the new player about all existing players
     for (auto& pair : s_sessions) {
@@ -612,6 +666,45 @@ void session_on_packet(ENetPeer* peer, const uint8_t* data, size_t length) {
         } else {
             spdlog::warn("Snapshot upload rejected: err={}", ack.error_code);
         }
+        break;
+    }
+    case PacketType::CHARACTER_UPLOAD: {
+        CharacterUpload hdr;
+        const uint8_t* tail = nullptr;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, hdr, tail, tail_len)) break;
+        if (tail_len < hdr.blob_size) break;  // truncated
+        auto it = s_peer_to_id.find(peer);
+        if (it == s_peer_to_id.end()) break;
+        auto sit = s_sessions.find(it->second);
+        if (sit == s_sessions.end()) break;
+        if (sit->second.client_uuid.empty()) {
+            spdlog::warn("CHARACTER_UPLOAD from player {} ignored "
+                         "(no client_uuid)", sit->second.id);
+            break;
+        }
+        character_store_set(sit->second.client_uuid, tail, hdr.blob_size);
+        break;
+    }
+    case PacketType::CHARACTER_APPEARANCE: {
+        CharacterAppearance hdr;
+        const uint8_t* tail = nullptr;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, hdr, tail, tail_len)) break;
+        if (tail_len < hdr.blob_size) break;
+        auto it = s_peer_to_id.find(peer);
+        if (it == s_peer_to_id.end()) break;
+        uint32_t sender_id = it->second;
+        // Cache + relay with sender-authoritative id.
+        s_appearance_cache[sender_id].assign(tail, tail + hdr.blob_size);
+        CharacterAppearance fwd = hdr;
+        fwd.player_id = sender_id;
+        std::vector<uint8_t> buf(sizeof(fwd) + hdr.blob_size);
+        std::memcpy(buf.data(), &fwd, sizeof(fwd));
+        std::memcpy(buf.data() + sizeof(fwd), tail, hdr.blob_size);
+        relay_broadcast(peer, buf.data(), buf.size(), true);
+        spdlog::info("CHARACTER_APPEARANCE cached+relayed for player {} "
+                     "({} bytes)", sender_id, hdr.blob_size);
         break;
     }
     default:

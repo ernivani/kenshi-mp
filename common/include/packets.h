@@ -52,6 +52,20 @@ namespace PacketType {
     // gate. See docs/superpowers/specs/2026-04-22-server-browser-ui-design.md
     static const uint8_t SERVER_INFO_REQUEST = 0xB0;
     static const uint8_t SERVER_INFO_REPLY   = 0xB1;
+    // Per-server character persistence. Joiner serializes its
+    // PlayerInterface squad state and uploads to the server; the server
+    // persists by client_uuid. On reconnect, server sends the stored
+    // blob back so the joiner restores the exact same squad instead of
+    // spawning a fresh Wanderer.
+    static const uint8_t CHARACTER_UPLOAD    = 0xC0;
+    static const uint8_t CHARACTER_RESTORE   = 0xC1;
+    // Per-character appearance blob (Kenshi GameDataCopyStandalone bytes
+    // from Character::getAppearanceData() → saveToFile). Clients send on
+    // local spawn + after editor close; server relays to all peers AND
+    // caches. New joiners receive cached blobs before any SpawnNPC so
+    // the blob is ready at spawn time (enables giveBirth-style spawn
+    // instead of random).
+    static const uint8_t CHARACTER_APPEARANCE = 0xC2;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +91,7 @@ struct ConnectRequest {
     // first run) and persists it; the server maps uuid → player_id so a player
     // who reconnects gets the same id as before.
     char         client_uuid[64];
+    char         password[MAX_PASSWORD_LENGTH];   // "" = no password provided
 
     ConnectRequest() {
         std::memset(this, 0, sizeof(*this));
@@ -439,6 +454,51 @@ struct ServerInfoReply {
         std::memset(this, 0, sizeof(*this));
         header.version = PROTOCOL_VERSION;
         header.type    = PacketType::SERVER_INFO_REPLY;
+    }
+};
+
+// Joiner-side → server: upload the serialized PlayerInterface blob
+// (Kenshi's GameData binary form) so the server can persist the
+// joiner's squad across sessions. Wire: {CharacterUpload}{<blob_size> bytes}.
+// Send via pack_with_tail, unpack with unpack_with_tail.
+struct CharacterUpload {
+    PacketHeader header;
+    uint32_t     blob_size;
+
+    CharacterUpload() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_UPLOAD;
+    }
+};
+
+// Server → joiner: after CONNECT_ACCEPT, if the server has a blob
+// stored for this UUID, send it so the client restores the squad
+// instead of spawning a fresh one. Same wire layout as CharacterUpload.
+struct CharacterRestore {
+    PacketHeader header;
+    uint32_t     blob_size;
+
+    CharacterRestore() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_RESTORE;
+    }
+};
+
+// Per-character appearance blob (authoritative player_id = server's
+// session id). Sent by clients, relayed+cached by the server, received
+// by all other peers to drive correct remote-NPC skin. Wire:
+// {CharacterAppearance}{<blob_size> bytes}.
+struct CharacterAppearance {
+    PacketHeader header;
+    uint32_t     player_id;
+    uint32_t     blob_size;
+
+    CharacterAppearance() {
+        std::memset(this, 0, sizeof(*this));
+        header.version = PROTOCOL_VERSION;
+        header.type    = PacketType::CHARACTER_APPEARANCE;
     }
 };
 

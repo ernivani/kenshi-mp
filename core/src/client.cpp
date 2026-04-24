@@ -3,6 +3,9 @@
 // Manages the network connection: connect, send, receive, disconnect.
 // Runs on the game thread — poll() is called each frame from player_sync.
 
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+
 #include <enet/enet.h>
 #include <cstring>
 #include <string>
@@ -22,6 +25,22 @@ static bool        s_connected = false;
 static uint32_t    s_local_id  = 0;
 static uint32_t    s_last_disconnect_reason = 0;   // 0 = none, 1 = kicked by server
 
+// Serializes ALL access to the ENetHost. Without this, the joiner
+// runtime's background connect thread and the main-thread player_sync
+// / host_sync / building_sync share enet_host_service without synchronization,
+// which can silently corrupt connect handshakes. Initialised on first use.
+static CRITICAL_SECTION s_enet_cs;
+static bool             s_enet_cs_inited = false;
+static void enet_lock_init() {
+    if (s_enet_cs_inited) return;
+    InitializeCriticalSection(&s_enet_cs);
+    s_enet_cs_inited = true;
+}
+struct EnetLock {
+    EnetLock()  { enet_lock_init(); EnterCriticalSection(&s_enet_cs); }
+    ~EnetLock() { LeaveCriticalSection(&s_enet_cs); }
+};
+
 // Callback for received packets — set by player_sync
 typedef void (*PacketCallback)(const uint8_t* data, size_t length);
 static PacketCallback s_on_packet;
@@ -30,6 +49,13 @@ static PacketCallback s_on_packet;
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 void client_init() {
+    enet_lock_init();
+    EnetLock lk;
+    // Idempotent — first caller creates the ENetHost, subsequent calls
+    // are no-ops. Matters because we call client_init from both the
+    // TitleScreen hook (so the joiner-runtime connect thread has a valid
+    // ENetHost before any GameWorld exists) AND the main-loop hook.
+    if (s_client) return;
     if (enet_initialize() != 0) {
         // TODO: log error
         return;
@@ -61,6 +87,7 @@ void client_shutdown() {
 // Connection
 // ---------------------------------------------------------------------------
 bool client_connect(const char* host, uint16_t port) {
+    EnetLock lk;
     if (!s_client || s_peer) return false;
 
     ENetAddress address;
@@ -84,6 +111,7 @@ bool client_connect(const char* host, uint16_t port) {
 }
 
 void client_disconnect() {
+    EnetLock lk;
     if (!s_peer) return;
 
     enet_peer_disconnect(s_peer, 0);
@@ -109,6 +137,7 @@ void client_disconnect() {
 // Send
 // ---------------------------------------------------------------------------
 void client_send_reliable(const uint8_t* data, size_t length) {
+    EnetLock lk;
     if (!s_peer || !s_connected) return;
 
     ENetPacket* packet = enet_packet_create(
@@ -119,6 +148,7 @@ void client_send_reliable(const uint8_t* data, size_t length) {
 }
 
 void client_send_unreliable(const uint8_t* data, size_t length) {
+    EnetLock lk;
     if (!s_peer || !s_connected) return;
 
     ENetPacket* packet = enet_packet_create(
@@ -146,6 +176,7 @@ void client_set_packet_callback(PacketCallback cb) {
 }
 
 void client_poll() {
+    EnetLock lk;
     if (!s_client) return;
 
     ENetEvent event;

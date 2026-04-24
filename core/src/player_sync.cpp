@@ -13,6 +13,7 @@
 
 #include <kenshi/Character.h>
 #include <kenshi/CharStats.h>
+#include <kenshi/GameWorld.h>
 #include <kenshi/Damages.h>
 #include <kenshi/Enums.h>
 #include <OgreVector3.h>
@@ -22,6 +23,7 @@
 #include "packets.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "client_identity.h"
 
 namespace kmp {
 
@@ -47,6 +49,7 @@ extern void client_set_packet_callback(PacketCallback cb);
 
 extern Character* game_get_player_character();
 extern bool game_is_world_loaded();
+extern GameWorld* game_get_world();
 
 extern void npc_manager_on_spawn(const SpawnNPC& pkt);
 extern void npc_manager_on_state(const PlayerState& pkt);
@@ -100,6 +103,8 @@ extern void snapshot_uploader_glue_tick(float dt);
 extern void snapshot_uploader_glue_on_ack(const SnapshotUploadAck& ack);
 
 extern void server_browser_tick(float dt);
+extern void joiner_runtime_glue_on_connect_accept(uint32_t player_id);
+extern void joiner_runtime_glue_on_connect_reject(const std::string& reason);
 
 // ---------------------------------------------------------------------------
 // State
@@ -108,6 +113,9 @@ static PlayerState s_last_sent_state;
 static float       s_send_timer = 0.0f;
 static bool        s_initialized = false;
 static bool        s_requested_host = false;  // did we connect with is_host=1?
+// Per-session flag — resets on disconnect so we re-send our appearance
+// after any reconnect (manual or auto).
+static bool        s_appearance_sent_this_session = false;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -154,6 +162,8 @@ static bool read_local_player_state(PlayerState& out) {
 // ---------------------------------------------------------------------------
 // Packet dispatch
 // ---------------------------------------------------------------------------
+extern bool joiner_runtime_glue_did_snapshot_join();
+
 static void on_packet_received(const uint8_t* data, size_t length) {
     PacketHeader header;
     if (!peek_header(data, length, header)) return;
@@ -165,9 +175,36 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         if (unpack(data, length, pkt)) {
             client_set_local_id(pkt.player_id);
             host_sync_set_host(s_requested_host);
+            {
+                char lb[128];
+                _snprintf(lb, sizeof(lb),
+                    "[KenshiMP] CONNECT_ACCEPT received player_id=%u "
+                    "s_requested_host=%d snapshot_join=%d",
+                    pkt.player_id, s_requested_host ? 1 : 0,
+                    joiner_runtime_glue_did_snapshot_join() ? 1 : 0);
+                KMP_LOG(lb);
+            }
             if (!s_requested_host) {
-                npc_manager_hide_local_npcs();
-                building_manager_hide_local_buildings();
+                // A.4 snapshot join: the local world was freshly loaded
+                // from the host's save and already matches host state.
+                // Wiping it would destroy exactly what we just loaded —
+                // only wipe in the legacy no-snapshot path.
+                extern bool joiner_runtime_glue_did_snapshot_join();
+                if (!joiner_runtime_glue_did_snapshot_join()) {
+                    npc_manager_hide_local_npcs();
+                    building_manager_hide_local_buildings();
+                } else {
+                    KMP_LOG("[KenshiMP] snapshot join: skipping local wipe "
+                            "(world already matches host)");
+                    // Schedule a deferred destroy of the inherited squad
+                    // — at CONNECT_ACCEPT time the save load is queued
+                    // but PlayerInterface may not have populated the
+                    // player-character list yet. player_sync_tick retries
+                    // until getAllPlayerCharacters() is non-empty, then
+                    // destroys them once.
+                    extern void player_sync_schedule_squad_destroy();
+                    player_sync_schedule_squad_destroy();
+                }
                 // Send combat stats to host
                 Character* local_ch = game_get_player_character();
                 if (local_ch) {
@@ -188,6 +225,16 @@ static void on_packet_received(const uint8_t* data, size_t length) {
                 }
             }
             ui_on_connect_accept(pkt.player_id);
+            joiner_runtime_glue_on_connect_accept(pkt.player_id);
+        }
+        break;
+    }
+
+    case PacketType::CONNECT_REJECT: {
+        ConnectReject pkt;
+        if (unpack(data, length, pkt)) {
+            KMP_LOG(std::string("[KenshiMP] CONNECT_REJECT: ") + pkt.reason);
+            joiner_runtime_glue_on_connect_reject(pkt.reason);
         }
         break;
     }
@@ -395,6 +442,45 @@ static void on_packet_received(const uint8_t* data, size_t length) {
         break;
     }
 
+    case PacketType::CHARACTER_APPEARANCE: {
+        CharacterAppearance pkt;
+        const uint8_t* tail = NULL;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, pkt, tail, tail_len)) break;
+        if (tail_len < pkt.blob_size) break;
+        if (pkt.player_id == client_get_local_id()) break;  // our own
+        extern void npc_manager_buffer_appearance(
+            uint32_t player_id, const uint8_t* blob, size_t len);
+        npc_manager_buffer_appearance(pkt.player_id, tail, pkt.blob_size);
+        char lb[128];
+        _snprintf(lb, sizeof(lb),
+            "[KenshiMP] CHARACTER_APPEARANCE p=%u buffered (%u bytes)",
+            pkt.player_id, pkt.blob_size);
+        KMP_LOG(lb);
+        break;
+    }
+
+    case PacketType::CHARACTER_RESTORE: {
+        CharacterRestore pkt;
+        const uint8_t* tail = NULL;
+        size_t tail_len = 0;
+        if (!unpack_with_tail(data, length, pkt, tail, tail_len)) break;
+        if (tail_len < pkt.blob_size) break;
+        extern bool game_apply_player_state(const uint8_t*, size_t);
+        extern void player_sync_cancel_squad_destroy();
+        // Cancel the scheduled destroy — the restore blob replaces the
+        // PlayerInterface squad with our previously-saved one. Destroying
+        // after restore would nuke the restored characters.
+        player_sync_cancel_squad_destroy();
+        bool ok = game_apply_player_state(tail, pkt.blob_size);
+        char logbuf[128];
+        _snprintf(logbuf, sizeof(logbuf),
+            "[KenshiMP] CHARACTER_RESTORE received %u bytes applied=%d",
+            pkt.blob_size, ok ? 1 : 0);
+        KMP_LOG(logbuf);
+        break;
+    }
+
     default:
         break;
     }
@@ -425,8 +511,58 @@ void player_sync_shutdown() {
 // ---------------------------------------------------------------------------
 // Tick — called every frame on the game thread via AddHook
 // ---------------------------------------------------------------------------
+static bool s_pending_squad_destroy = false;
+static float s_pending_squad_destroy_timeout = 0.0f;
+
+void player_sync_schedule_squad_destroy() {
+    s_pending_squad_destroy = true;
+    s_pending_squad_destroy_timeout = 30.0f; // seconds
+    KMP_LOG("[KenshiMP] snapshot join: squad destroy scheduled");
+}
+
+void player_sync_cancel_squad_destroy() {
+    if (s_pending_squad_destroy) {
+        KMP_LOG("[KenshiMP] snapshot join: squad destroy cancelled "
+                "(CHARACTER_RESTORE took over)");
+    }
+    s_pending_squad_destroy = false;
+}
+
 void player_sync_tick(float dt) {
     if (!s_initialized) return;
+
+    // Deferred inherited-squad cleanup for snapshot join. PlayerInterface
+    // populates playerCharacters a few frames after SaveManager::load
+    // completes — retry until the list has members, then destroy once and
+    // open Kenshi's native character editor on a fresh spawn.
+    if (s_pending_squad_destroy) {
+        extern int game_destroy_inherited_player_squad();
+        int n = game_destroy_inherited_player_squad();
+        if (n > 0) {
+            char buf[96];
+            _snprintf(buf, sizeof(buf),
+                "[KenshiMP] snapshot join: destroyed %d inherited "
+                "player character(s)", n);
+            KMP_LOG(buf);
+            s_pending_squad_destroy = false;
+
+            extern Character* game_spawn_joiner_character_and_edit();
+            Character* joiner_ch = game_spawn_joiner_character_and_edit();
+            if (joiner_ch) {
+                KMP_LOG("[KenshiMP] snapshot join: spawned joiner character");
+            } else {
+                KMP_LOG("[KenshiMP] snapshot join: WARNING failed to spawn "
+                        "joiner character");
+            }
+        } else {
+            s_pending_squad_destroy_timeout -= dt;
+            if (s_pending_squad_destroy_timeout <= 0.0f) {
+                KMP_LOG("[KenshiMP] snapshot join: squad destroy timed out "
+                        "(PlayerInterface never populated)");
+                s_pending_squad_destroy = false;
+            }
+        }
+    }
 
     // Track connection state to detect drops
     static bool s_was_connected = false;
@@ -445,7 +581,14 @@ void player_sync_tick(float dt) {
 
     // (F12 manual-attack binding removed — conflicts with Shift+F12 in Kenshi.)
 
-    // Poll network if connected
+    // Main thread takes over ENet polling — stop the joiner runtime's
+    // async-connect keepalive loop if still running.
+    extern void joiner_runtime_glue_stop_keepalive();
+    joiner_runtime_glue_stop_keepalive();
+
+    // Poll network if connected. ENet calls in client.cpp are wrapped in
+    // a CRITICAL_SECTION so it's safe even while the joiner_runtime's
+    // async connect thread is running handshakes.
     if (client_is_connected()) {
         client_poll();
         s_was_connected = true;
@@ -468,6 +611,10 @@ void player_sync_tick(float dt) {
         npc_manager_show_local_npcs();
         building_manager_show_local_buildings();
         ui_on_disconnect();
+        // Ensure appearance is re-broadcast after reconnect. Server
+        // cleared our cached blob on disconnect (and we may be re-
+        // assigned a new player_id), so other peers need it again.
+        s_appearance_sent_this_session = false;
     }
 
     // Auto-reconnect after disconnect
@@ -478,11 +625,20 @@ void player_sync_tick(float dt) {
             s_reconnect_timer = 0.0f;
             KMP_LOG("[KenshiMP] Attempting reconnect...");
             if (client_connect("127.0.0.1", 7777)) {
+                // Use the real client identity (name/model/uuid) — not
+                // a hardcoded "Player"/"Wanderer" — so the host keeps
+                // appearing as 'Host' and the server resolves our
+                // stable player id via UUID.
                 ConnectRequest req;
-                std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
-                req.name[MAX_NAME_LENGTH - 1] = '\0';
-                std::strncpy(req.model, "greenlander", MAX_MODEL_LENGTH - 1);
-                req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                const std::string& n = s_requested_host
+                    ? std::string("Host")
+                    : client_identity_get_name();
+                const std::string& m = client_identity_get_model();
+                std::strncpy(req.name, n.c_str(), MAX_NAME_LENGTH - 1);
+                std::strncpy(req.model, m.c_str(), MAX_MODEL_LENGTH - 1);
+                const char* uuid = client_identity_get_uuid();
+                if (uuid) std::strncpy(req.client_uuid, uuid,
+                                       sizeof(req.client_uuid) - 1);
                 req.is_host = s_requested_host ? 1 : 0;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
@@ -492,11 +648,121 @@ void player_sync_tick(float dt) {
         }
     }
 
-    // Only do game sync when connected and world is loaded
-    if (!client_is_connected() || !game_is_world_loaded()) return;
+    // Only do game sync when connected to server.
+    if (!client_is_connected()) return;
 
-    // Update remote NPC positions (interpolation)
-    npc_manager_update(dt);
+    // Track editor open/close edge — MUST run before the gate below,
+    // otherwise we never observe the "editor just closed" transition.
+    extern bool char_editor_is_open();
+    static bool s_editor_was_open = false;
+    bool editor_open_now = char_editor_is_open();
+    bool editor_closed_edge = s_editor_was_open && !editor_open_now;
+    s_editor_was_open = editor_open_now;
+
+    // DIAGNOSTIC: while our native character editor is open on the
+    // joiner, the Character is in an internal editor state (scene
+    // swap, physics disabled, etc). Sending PlayerState / combat
+    // packets with this state was suspected to corrupt the host's
+    // view. Gate ALL sends while editor is open to test.
+    if (editor_open_now) {
+        static bool s_logged_once = false;
+        if (!s_logged_once) {
+            KMP_LOG("[KenshiMP] player_sync: gated — editor open, skipping sends");
+            s_logged_once = true;
+        }
+        return;
+    }
+
+    // Update remote NPC positions (interpolation) as soon as a GameWorld
+    // exists — even if the local player has no squad (snapshot-joined
+    // joiner that just destroyed the inherited squad). Without this the
+    // host's remote avatar freezes in place.
+    if (game_get_world()) {
+        npc_manager_update(dt);
+    }
+
+    // Rest of the tick needs the local player to exist.
+    if (!game_is_world_loaded()) return;
+
+    // Appearance broadcast. Send one packet per relevant event:
+    // first time local char exists post-connect, and DELAYED after the
+    // editor close edge (user confirmed new look). The delay is because
+    // calling getAppearanceData() right after CEW::_DESTRUCTOR crashed
+    // Kenshi in internal render/skeleton state — give it a few frames
+    // to re-stabilise before we touch the Character again.
+    static int s_delayed_send_countdown = 0;  // >0 means "send in N ticks"
+    if (editor_closed_edge) {
+        s_delayed_send_countdown = 60;  // ~1 s at 60 fps
+        KMP_LOG("[KenshiMP] appearance: editor closed — delaying send 60 ticks");
+    }
+    bool fire_delayed_send = false;
+    if (s_delayed_send_countdown > 0) {
+        --s_delayed_send_countdown;
+        if (s_delayed_send_countdown == 0) fire_delayed_send = true;
+    }
+    {
+        bool should_send = (!s_appearance_sent_this_session) || fire_delayed_send;
+        if (should_send) {
+            Character* local_ch = game_get_player_character();
+            if (local_ch) {
+                extern std::vector<uint8_t>
+                    game_serialize_character_appearance(Character*);
+                std::vector<uint8_t> blob =
+                    game_serialize_character_appearance(local_ch);
+                if (!blob.empty()) {
+                    CharacterAppearance hdr;
+                    hdr.player_id = client_get_local_id();
+                    hdr.blob_size = static_cast<uint32_t>(blob.size());
+                    std::vector<uint8_t> packed = pack_with_tail(
+                        hdr, blob.data(), blob.size());
+                    client_send_reliable(packed.data(), packed.size());
+                    bool was_first = !s_appearance_sent_this_session;
+                    s_appearance_sent_this_session = true;
+                    char lb[128];
+                    _snprintf(lb, sizeof(lb),
+                        "[KenshiMP] CHARACTER_APPEARANCE sent %u bytes "
+                        "(first=%d, post_editor=%d)",
+                        hdr.blob_size, was_first ? 1 : 0,
+                        fire_delayed_send ? 1 : 0);
+                    KMP_LOG(lb);
+                }
+            }
+        }
+    }
+
+    // Joiners: periodically upload our serialized squad to the server so
+    // it can send it back on our next reconnect (character persistence).
+    // First upload ~8 s after connect to let initial spawn settle; then
+    // every 30 s.
+    //
+    // DIAGNOSTIC: temporarily DISABLED to test hypothesis B — whether
+    // PlayerInterface::serialise() is what corrupts Character state and
+    // crashes the host on subsequent PlayerState receive. If host stops
+    // crashing with this off, the culprit is the serialisation path.
+    static const bool kDiagDisableUpload = true;
+    if (!kDiagDisableUpload &&
+        !s_requested_host &&
+        joiner_runtime_glue_did_snapshot_join()) {
+        static float s_upload_timer = 22.0f;  // -> first fire at +8 s
+        s_upload_timer += dt;
+        if (s_upload_timer >= 30.0f) {
+            s_upload_timer = 0.0f;
+            extern std::vector<uint8_t> game_serialize_player_state();
+            std::vector<uint8_t> blob = game_serialize_player_state();
+            if (!blob.empty()) {
+                CharacterUpload hdr;
+                hdr.blob_size = static_cast<uint32_t>(blob.size());
+                std::vector<uint8_t> packed = pack_with_tail(
+                    hdr, blob.data(), blob.size());
+                client_send_reliable(packed.data(), packed.size());
+                char logbuf[96];
+                _snprintf(logbuf, sizeof(logbuf),
+                    "[KenshiMP] CHARACTER_UPLOAD sent %u bytes",
+                    hdr.blob_size);
+                KMP_LOG(logbuf);
+            }
+        }
+    }
 
     // Host: scan and send NPC state to server
     // (disabled — joiner should only see remote player avatars, not host's NPCs)

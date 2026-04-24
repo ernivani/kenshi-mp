@@ -16,12 +16,19 @@ add_library(KenshiMP SHARED
     src/ui.cpp
     src/client_identity.cpp
     src/save_trigger.cpp
+    src/load_trigger.cpp
     src/snapshot_zip.cpp
+    src/snapshot_extract.cpp
     src/snapshot_uploader.cpp
     src/snapshot_uploader_glue.cpp
+    src/snapshot_client.cpp
     src/server_list.cpp
     src/server_pinger.cpp
     src/server_browser.cpp
+    src/joiner_runtime.cpp
+    src/joiner_runtime_glue.cpp
+    src/char_editor.cpp
+    src/re_tools.cpp
     ${CMAKE_SOURCE_DIR}/deps/miniz/miniz.c
 )
 
@@ -85,4 +92,4 @@ if(ENET_DIR)
 endif()
 
 # Windows libs
-target_link_libraries(KenshiMP PRIVATE ws2_32 winmm shell32)
+target_link_libraries(KenshiMP PRIVATE ws2_32 winmm shell32 winhttp)

@@ -29,8 +29,16 @@ public:
 #include "serialization.h"
 #include "server_list.h"
 #include "server_pinger.h"
+#include "client_identity.h"
 
 namespace kmp {
+
+extern void joiner_runtime_glue_start(const ServerEntry& entry);
+extern void joiner_runtime_glue_cancel();
+extern int  joiner_runtime_glue_state_int();
+extern std::string joiner_runtime_glue_stage_label();
+extern std::string joiner_runtime_glue_progress_text();
+extern std::string joiner_runtime_glue_last_error();
 
 namespace {
 
@@ -269,11 +277,26 @@ static void on_connecting_cancel(MyGUI::Widget*);
 
 static void update_connecting_caption() {
     if (!s_connecting_visible || !s_connecting_label) return;
+    int st = joiner_runtime_glue_state_int();
+    std::string stage = joiner_runtime_glue_stage_label();
+    std::string progress = joiner_runtime_glue_progress_text();
+
     ULONGLONG elapsed = GetTickCount64() - s_connecting_since_ms;
-    int dots = (int)((elapsed / 500) % 3) + 1;  // 1, 2, 3, 1, 2, 3, ...
+    int dots = (int)((elapsed / 500) % 3) + 1;
     const char* dot_str = (dots == 1) ? "." : (dots == 2) ? ".." : "...";
-    std::string caption = "Connecting" + std::string(dot_str) +
-                          "\n\n" + s_connecting_server_line;
+
+    std::string caption;
+    // State enum order: 0=Idle 1=Downloading 2=Extracting 3=LoadTrigger
+    // 4=LoadWait 5=EnetConnect 6=AwaitAccept 7=Done 8=Cancelled 9=Failed.
+    if (st == 9) {
+        caption = "Error: " + joiner_runtime_glue_last_error();
+    } else if (st == 7 || st == 8) {
+        caption = std::string();
+    } else {
+        caption = stage + dot_str;
+        if (!progress.empty()) caption += std::string("\n") + progress;
+        caption += "\n\n" + s_connecting_server_line;
+    }
     s_connecting_label->setCaption(caption);
 }
 
@@ -347,22 +370,190 @@ static void hide_connecting_modal() {
 
 static void on_connecting_cancel(MyGUI::Widget*) {
     KMP_LOG("[KenshiMP] Join cancelled by user");
+    joiner_runtime_glue_cancel();
     hide_connecting_modal();
+}
+
+// ---------------------------------------------------------------------------
+// Character-create modal (shown before Join fires).
+//
+// Collects the joiner's name + race (model). Persisted via client_identity
+// so the joiner's send_connect_request_real picks them up, and the host-
+// side npc_manager_on_spawn uses the model to pick a proper Kenshi CHARACTER
+// template.
+// ---------------------------------------------------------------------------
+static MyGUI::Window*  s_cc_window     = NULL;
+static MyGUI::EditBox* s_cc_name_edit  = NULL;
+static MyGUI::Button*  s_cc_race_prev  = NULL;
+static MyGUI::Button*  s_cc_race_next  = NULL;
+static MyGUI::TextBox* s_cc_race_label = NULL;
+static MyGUI::Button*  s_cc_ok         = NULL;
+static MyGUI::Button*  s_cc_cancel     = NULL;
+static ServerEntry     s_cc_pending;
+static int             s_cc_race_idx   = 0;
+
+// Character-template candidates from the CHARACTER GameData dump we did.
+// "Wanderer" is verified; the others are reasonable starter-class names —
+// if Kenshi can't resolve one, npc_manager falls back to random (so we
+// still get a character, just not the chosen look).
+static const char* kCCRaces[] = {
+    "Wanderer",
+    "UC start",
+    "Starving Vagrant",
+    "Citizen",
+    NULL
+};
+static int cc_race_count() {
+    int n = 0; while (kCCRaces[n]) ++n; return n;
+}
+static void cc_refresh_race_label() {
+    if (!s_cc_race_label) return;
+    int n = cc_race_count();
+    if (n == 0) return;
+    if (s_cc_race_idx < 0) s_cc_race_idx = n - 1;
+    if (s_cc_race_idx >= n) s_cc_race_idx = 0;
+    s_cc_race_label->setCaption(kCCRaces[s_cc_race_idx]);
+}
+static void on_cc_race_prev(MyGUI::Widget*) { --s_cc_race_idx; cc_refresh_race_label(); }
+static void on_cc_race_next(MyGUI::Widget*) { ++s_cc_race_idx; cc_refresh_race_label(); }
+
+static void on_cc_cancel(MyGUI::Widget*) {
+    if (s_cc_window) s_cc_window->setVisible(false);
+}
+
+static void on_cc_ok(MyGUI::Widget*) {
+    // Grab name + race, persist, proceed to join.
+    std::string name = s_cc_name_edit ? s_cc_name_edit->getCaption().asUTF8()
+                                      : std::string();
+    while (!name.empty() && (name.back() == ' ' || name.back() == '\t' ||
+                             name.back() == '\r' || name.back() == '\n'))
+        name.pop_back();
+    while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
+        name.erase(name.begin());
+    if (name.empty()) name = "Wanderer";
+
+    std::string race = (s_cc_race_idx >= 0 && s_cc_race_idx < cc_race_count())
+        ? std::string(kCCRaces[s_cc_race_idx]) : std::string("Wanderer");
+
+    client_identity_set_name(name);
+    client_identity_set_model(race);
+
+    if (s_cc_window) s_cc_window->setVisible(false);
+
+    char logbuf[256];
+    _snprintf(logbuf, sizeof(logbuf),
+        "[KenshiMP] Join: '%s' as '%s' (race=%s) @ %s:%u",
+        s_cc_pending.name.c_str(), name.c_str(), race.c_str(),
+        s_cc_pending.address.c_str(),
+        static_cast<unsigned>(s_cc_pending.port));
+    KMP_LOG(logbuf);
+    show_connecting_modal(s_cc_pending);
+    joiner_runtime_glue_start(s_cc_pending);
+}
+
+static void show_character_create(const ServerEntry& e) {
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+    if (!gui) return;
+
+    s_cc_pending = e;
+
+    if (!s_cc_window) {
+        s_cc_window = create_chromeless_window(
+            NULL, MyGUI::IntCoord(312, 260, 400, 240),
+            MyGUI::Align::Default, "Overlapped", "KMP_CharCreateWindow");
+        if (!s_cc_window) return;
+
+        MyGUI::Colour textCol(0.92f, 0.88f, 0.82f);
+
+        MyGUI::TextBox* title = s_cc_window->createWidget<MyGUI::TextBox>(
+            "Kenshi_TextBoxEmptySkin",
+            MyGUI::IntCoord(16, 16, 368, 28), MyGUI::Align::Default);
+        title->setFontName("Kenshi_PaintedTextFont_Large");
+        title->setTextAlign(MyGUI::Align::Center);
+        title->setTextColour(textCol);
+        title->setCaption("Create your character");
+
+        MyGUI::TextBox* name_lbl = s_cc_window->createWidget<MyGUI::TextBox>(
+            "Kenshi_TextBoxEmptySkin",
+            MyGUI::IntCoord(24, 60, 80, 28), MyGUI::Align::Default);
+        name_lbl->setFontName("Kenshi_StandardFont_Medium");
+        name_lbl->setTextColour(textCol);
+        name_lbl->setCaption("Name:");
+
+        s_cc_name_edit = s_cc_window->createWidget<MyGUI::EditBox>(
+            "Kenshi_EditBox",
+            MyGUI::IntCoord(110, 60, 270, 28), MyGUI::Align::Default);
+        s_cc_name_edit->setFontName("Kenshi_StandardFont_Medium");
+        s_cc_name_edit->setTextColour(textCol);
+
+        MyGUI::TextBox* race_lbl = s_cc_window->createWidget<MyGUI::TextBox>(
+            "Kenshi_TextBoxEmptySkin",
+            MyGUI::IntCoord(24, 100, 80, 28), MyGUI::Align::Default);
+        race_lbl->setFontName("Kenshi_StandardFont_Medium");
+        race_lbl->setTextColour(textCol);
+        race_lbl->setCaption("Race:");
+
+        s_cc_race_prev = s_cc_window->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(110, 100, 30, 28), MyGUI::Align::Default);
+        s_cc_race_prev->setCaption("<");
+        s_cc_race_prev->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_cc_race_prev->setTextAlign(MyGUI::Align::Center);
+        s_cc_race_prev->eventMouseButtonClick += MyGUI::newDelegate(on_cc_race_prev);
+
+        s_cc_race_label = s_cc_window->createWidget<MyGUI::TextBox>(
+            "Kenshi_TextBoxEmptySkin",
+            MyGUI::IntCoord(145, 100, 200, 28), MyGUI::Align::Default);
+        s_cc_race_label->setFontName("Kenshi_StandardFont_Medium");
+        s_cc_race_label->setTextAlign(MyGUI::Align::Center);
+        s_cc_race_label->setTextColour(textCol);
+
+        s_cc_race_next = s_cc_window->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(350, 100, 30, 28), MyGUI::Align::Default);
+        s_cc_race_next->setCaption(">");
+        s_cc_race_next->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_cc_race_next->setTextAlign(MyGUI::Align::Center);
+        s_cc_race_next->eventMouseButtonClick += MyGUI::newDelegate(on_cc_race_next);
+
+        s_cc_cancel = s_cc_window->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(60, 180, 130, 36), MyGUI::Align::Default);
+        s_cc_cancel->setCaption("Cancel");
+        s_cc_cancel->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_cc_cancel->setTextAlign(MyGUI::Align::Center);
+        s_cc_cancel->eventMouseButtonClick += MyGUI::newDelegate(on_cc_cancel);
+
+        s_cc_ok = s_cc_window->createWidget<MyGUI::Button>(
+            "Kenshi_Button1Skin",
+            MyGUI::IntCoord(210, 180, 130, 36), MyGUI::Align::Default);
+        s_cc_ok->setCaption("Join!");
+        s_cc_ok->setFontName("Kenshi_PaintedTextFont_Medium");
+        s_cc_ok->setTextAlign(MyGUI::Align::Center);
+        s_cc_ok->eventMouseButtonClick += MyGUI::newDelegate(on_cc_ok);
+    }
+
+    // Pre-fill with previously-saved values.
+    s_cc_name_edit->setCaption(client_identity_get_name());
+    const std::string& cur_race = client_identity_get_model();
+    s_cc_race_idx = 0;
+    for (int i = 0; i < cc_race_count(); ++i) {
+        if (cur_race == kCCRaces[i]) { s_cc_race_idx = i; break; }
+    }
+    cc_refresh_race_label();
+
+    s_cc_window->setVisible(true);
+    MyGUI::LayerManager::getInstance().upLayerItem(s_cc_window);
+    MyGUI::InputManager::getInstance().setKeyFocusWidget(s_cc_name_edit);
 }
 
 static void on_join(MyGUI::Widget*) {
     for (size_t i = 0; i < s_entries.size(); ++i) {
         const ServerEntry& e = s_entries[i];
         if (e.id != s_selected_id) continue;
-        char logbuf[256];
-        _snprintf(logbuf, sizeof(logbuf),
-            "[KenshiMP] Join clicked: '%s' @ %s:%u",
-            e.name.c_str(), e.address.c_str(), static_cast<unsigned>(e.port));
-        KMP_LOG(logbuf);
-        show_connecting_modal(e);
+        show_character_create(e);
         break;
     }
-    // Don't close the browser; show the connecting modal on top instead.
 }
 
 // Get TitleScreen's main widget via BaseLayout::mMainWidget at offset 0x38.
@@ -954,6 +1145,43 @@ void server_browser_close() {
     s_ts_hidden_children.clear();
 }
 
+// Force-destroy all our browser/connecting widgets and restore TitleScreen,
+// even mid-connect. Used by the joiner right before SaveManager::loadGame —
+// just hiding isn't enough: loadGame internally iterates MyGUI widgets and
+// crashes touching our still-alive (but hidden) windows.
+void server_browser_force_close_for_load() {
+    stop_all_pings();
+    MyGUI::Gui* gui = MyGUI::Gui::getInstancePtr();
+
+    // Destroy row widgets (children of s_list_scroll).
+    for (auto it = s_rows.begin(); it != s_rows.end(); ++it) {
+        if (it->second.root && gui) gui->destroyWidget(it->second.root);
+    }
+    s_rows.clear();
+
+    if (s_connecting_window && gui) gui->destroyWidget(s_connecting_window);
+    if (s_add_window && gui)        gui->destroyWidget(s_add_window);
+    if (s_window && gui)            gui->destroyWidget(s_window);
+    if (s_backdrop && gui)          gui->destroyWidget(s_backdrop);
+    s_connecting_window = NULL; s_connecting_label = NULL; s_connecting_cancel = NULL;
+    s_add_window = NULL; s_add_ok = NULL; s_add_cancel = NULL; s_add_err = NULL;
+    s_window = NULL; s_backdrop = NULL; s_list_scroll = NULL;
+    s_btn_refresh = NULL; s_btn_back = NULL; s_btn_direct = NULL;
+    s_btn_add = NULL; s_btn_edit = NULL; s_btn_remove = NULL; s_btn_join = NULL;
+
+    // Restore TitleScreen root + children we hid.
+    for (size_t i = s_ts_hidden_children.size(); i > 0; --i) {
+        MyGUI::Widget* w = s_ts_hidden_children[i - 1].w;
+        if (w && s_ts_hidden_children[i - 1].was_visible) {
+            w->setVisible(true);
+        }
+    }
+    s_ts_hidden_children.clear();
+
+    s_open = false;
+    s_connecting_visible = false;
+}
+
 bool server_browser_is_open() { return s_open; }
 
 void server_browser_tick(float /*dt*/) {
@@ -968,6 +1196,12 @@ void server_browser_tick(float /*dt*/) {
         try {
             MyGUI::LayerManager::getInstance().upLayerItem(s_connecting_window);
         } catch (...) { }
+    }
+
+    int st = joiner_runtime_glue_state_int();
+    if (s_connecting_visible && st == 7 /*Done*/) {
+        hide_connecting_modal();
+        server_browser_close();
     }
 }
 

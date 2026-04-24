@@ -29,6 +29,11 @@ namespace kmp {
     void server_browser_init();
     void server_browser_shutdown();
     void server_browser_tick(float dt);
+    void joiner_runtime_glue_init();
+    void joiner_runtime_glue_shutdown();
+    void joiner_runtime_glue_tick(float dt);
+    void char_editor_install_hook();
+    void char_editor_tick();
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +59,12 @@ static void hooked_title_update(void* self) {
         KMP_LOG("[KenshiMP] Title screen detected; initialising menu UI...");
         kmp::ui_init();
         kmp::server_browser_init();
+        // client_init creates the ENetHost. The joiner runtime's async
+        // connect thread (triggered by Join click before any GameWorld
+        // exists) would otherwise race against a still-NULL s_client and
+        // silently fail. Idempotent — hooked_main_loop skips it later.
+        kmp::client_init();
+        kmp::joiner_runtime_glue_init();
     }
     kmp::ui_update_main_menu_button();
     // Tick the server browser too — its ping state machine needs frame
@@ -62,6 +73,7 @@ static void hooked_title_update(void* self) {
     // lives, so we tick here. dt is approximate (title-screen hook doesn't
     // pass real dt); 1/60s is fine for network-grade timing.
     kmp::server_browser_tick(0.016f);
+    kmp::joiner_runtime_glue_tick(0.016f);
 }
 
 static void hooked_main_loop(GameWorld* world, float time) {
@@ -74,19 +86,29 @@ static void hooked_main_loop(GameWorld* world, float time) {
     if (!s_subsystems_initialized) {
         s_subsystems_initialized = true;
         KMP_LOG("[KenshiMP] Initialising subsystems...");
-        kmp::client_init();
+        kmp::client_init();  // idempotent; may have run from TitleScreen hook
         kmp::npc_manager_init();
         kmp::player_sync_init();
         // ui_init may have already run from the TitleScreen hook — it's a
         // no-op when s_ui_initialized is true (see ui.cpp).
         if (!s_title_ui_inited) kmp::ui_init();
         kmp::snapshot_uploader_glue_init();
-        kmp::server_browser_init();
+        // server_browser / joiner_runtime may have already been init'd
+        // from the TitleScreen hook — those inits are idempotent (no-op
+        // when already initialized).
+        if (!s_title_ui_inited) kmp::server_browser_init();
+        if (!s_title_ui_inited) kmp::joiner_runtime_glue_init();
         KMP_LOG("[KenshiMP] Subsystems ready");
     }
 
     // Run multiplayer sync on the game thread
     kmp::player_sync_tick(time);
+
+    // Keep joiner_runtime ticking after load completes — once the game
+    // world exists, TitleScreen::update stops firing, so its LoadWait →
+    // EnetConnect → AwaitAccept steps would stall without this.
+    kmp::joiner_runtime_glue_tick(time);
+    kmp::char_editor_tick();
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +167,11 @@ __declspec(dllexport) void startPlugin() {
     } else {
         KMP_LOG("[KenshiMP] Warning: TitleScreen::update symbol not found");
     }
+
+    // Install ForgottenGUI::update hook so we can capture the FGUI
+    // singleton pointer and call showCharacterEditor directly later
+    // (PlayerInterface::activateCharacterEditMode crashes mid-game).
+    kmp::char_editor_install_hook();
 
     KMP_LOG("[KenshiMP] Plugin loaded OK (game loop hooked)");
 }
