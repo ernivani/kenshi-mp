@@ -23,6 +23,7 @@
 #include "packets.h"
 #include "protocol.h"
 #include "serialization.h"
+#include "client_identity.h"
 
 namespace kmp {
 
@@ -112,6 +113,9 @@ static PlayerState s_last_sent_state;
 static float       s_send_timer = 0.0f;
 static bool        s_initialized = false;
 static bool        s_requested_host = false;  // did we connect with is_host=1?
+// Per-session flag — resets on disconnect so we re-send our appearance
+// after any reconnect (manual or auto).
+static bool        s_appearance_sent_this_session = false;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -607,6 +611,10 @@ void player_sync_tick(float dt) {
         npc_manager_show_local_npcs();
         building_manager_show_local_buildings();
         ui_on_disconnect();
+        // Ensure appearance is re-broadcast after reconnect. Server
+        // cleared our cached blob on disconnect (and we may be re-
+        // assigned a new player_id), so other peers need it again.
+        s_appearance_sent_this_session = false;
     }
 
     // Auto-reconnect after disconnect
@@ -617,11 +625,20 @@ void player_sync_tick(float dt) {
             s_reconnect_timer = 0.0f;
             KMP_LOG("[KenshiMP] Attempting reconnect...");
             if (client_connect("127.0.0.1", 7777)) {
+                // Use the real client identity (name/model/uuid) — not
+                // a hardcoded "Player"/"Wanderer" — so the host keeps
+                // appearing as 'Host' and the server resolves our
+                // stable player id via UUID.
                 ConnectRequest req;
-                std::strncpy(req.name, "Player", MAX_NAME_LENGTH - 1);
-                req.name[MAX_NAME_LENGTH - 1] = '\0';
-                std::strncpy(req.model, "Wanderer", MAX_MODEL_LENGTH - 1);
-                req.model[MAX_MODEL_LENGTH - 1] = '\0';
+                const std::string& n = s_requested_host
+                    ? std::string("Host")
+                    : client_identity_get_name();
+                const std::string& m = client_identity_get_model();
+                std::strncpy(req.name, n.c_str(), MAX_NAME_LENGTH - 1);
+                std::strncpy(req.model, m.c_str(), MAX_MODEL_LENGTH - 1);
+                const char* uuid = client_identity_get_uuid();
+                if (uuid) std::strncpy(req.client_uuid, uuid,
+                                       sizeof(req.client_uuid) - 1);
                 req.is_host = s_requested_host ? 1 : 0;
                 std::vector<uint8_t> buf = pack(req);
                 client_send_reliable(buf.data(), buf.size());
@@ -634,13 +651,20 @@ void player_sync_tick(float dt) {
     // Only do game sync when connected to server.
     if (!client_is_connected()) return;
 
+    // Track editor open/close edge — MUST run before the gate below,
+    // otherwise we never observe the "editor just closed" transition.
+    extern bool char_editor_is_open();
+    static bool s_editor_was_open = false;
+    bool editor_open_now = char_editor_is_open();
+    bool editor_closed_edge = s_editor_was_open && !editor_open_now;
+    s_editor_was_open = editor_open_now;
+
     // DIAGNOSTIC: while our native character editor is open on the
     // joiner, the Character is in an internal editor state (scene
     // swap, physics disabled, etc). Sending PlayerState / combat
     // packets with this state was suspected to corrupt the host's
     // view. Gate ALL sends while editor is open to test.
-    extern bool char_editor_is_open();
-    if (char_editor_is_open()) {
+    if (editor_open_now) {
         static bool s_logged_once = false;
         if (!s_logged_once) {
             KMP_LOG("[KenshiMP] player_sync: gated — editor open, skipping sends");
@@ -660,18 +684,24 @@ void player_sync_tick(float dt) {
     // Rest of the tick needs the local player to exist.
     if (!game_is_world_loaded()) return;
 
-    // Appearance broadcast (Phase 1 infrastructure). Send one packet per
-    // relevant event: first time local char exists post-connect, and on
-    // the falling edge of the editor (user confirmed new look). Server
-    // caches + relays; receivers buffer for use at spawn time.
+    // Appearance broadcast. Send one packet per relevant event:
+    // first time local char exists post-connect, and DELAYED after the
+    // editor close edge (user confirmed new look). The delay is because
+    // calling getAppearanceData() right after CEW::_DESTRUCTOR crashed
+    // Kenshi in internal render/skeleton state — give it a few frames
+    // to re-stabilise before we touch the Character again.
+    static int s_delayed_send_countdown = 0;  // >0 means "send in N ticks"
+    if (editor_closed_edge) {
+        s_delayed_send_countdown = 60;  // ~1 s at 60 fps
+        KMP_LOG("[KenshiMP] appearance: editor closed — delaying send 60 ticks");
+    }
+    bool fire_delayed_send = false;
+    if (s_delayed_send_countdown > 0) {
+        --s_delayed_send_countdown;
+        if (s_delayed_send_countdown == 0) fire_delayed_send = true;
+    }
     {
-        static bool s_appearance_sent_once = false;
-        static bool s_editor_was_open      = false;
-        bool editor_open_now = char_editor_is_open();
-        bool editor_closed_edge = s_editor_was_open && !editor_open_now;
-        s_editor_was_open = editor_open_now;
-
-        bool should_send = (!s_appearance_sent_once) || editor_closed_edge;
+        bool should_send = (!s_appearance_sent_this_session) || fire_delayed_send;
         if (should_send) {
             Character* local_ch = game_get_player_character();
             if (local_ch) {
@@ -686,13 +716,14 @@ void player_sync_tick(float dt) {
                     std::vector<uint8_t> packed = pack_with_tail(
                         hdr, blob.data(), blob.size());
                     client_send_reliable(packed.data(), packed.size());
-                    s_appearance_sent_once = true;
+                    bool was_first = !s_appearance_sent_this_session;
+                    s_appearance_sent_this_session = true;
                     char lb[128];
                     _snprintf(lb, sizeof(lb),
                         "[KenshiMP] CHARACTER_APPEARANCE sent %u bytes "
-                        "(first=%d, editor_closed_edge=%d)",
-                        hdr.blob_size, s_appearance_sent_once ? 1 : 0,
-                        editor_closed_edge ? 1 : 0);
+                        "(first=%d, post_editor=%d)",
+                        hdr.blob_size, was_first ? 1 : 0,
+                        fire_delayed_send ? 1 : 0);
                     KMP_LOG(lb);
                 }
             }
